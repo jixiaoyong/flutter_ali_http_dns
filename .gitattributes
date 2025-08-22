@@ -1,0 +1,7 @@
+# 生成文件配置
+*.freezed.dart linguist-generated=true
+*.g.dart linguist-generated=true
+*.mocks.dart linguist-generated=true
+
+# 这些文件是自动生成的，不应该手动编辑
+# 修改源文件后需要运行: flutter pub run build_runner build --delete-conflicting-outputs

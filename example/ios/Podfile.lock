@@ -1,0 +1,35 @@
+PODS:
+  - AlicloudPDNS (2.2.0)
+  - Flutter (1.0.0)
+  - flutter_ali_http_dns (0.0.1):
+    - AlicloudPDNS
+    - Flutter
+  - integration_test (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - flutter_ali_http_dns (from `.symlinks/plugins/flutter_ali_http_dns/ios`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
+
+SPEC REPOS:
+  trunk:
+    - AlicloudPDNS
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  flutter_ali_http_dns:
+    :path: ".symlinks/plugins/flutter_ali_http_dns/ios"
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
+
+SPEC CHECKSUMS:
+  AlicloudPDNS: a0e20acda14d88d77d192eb6bebdbc0ba4eb86a2
+  Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
+  flutter_ali_http_dns: c4312532189e536b921e90ead17e79e0c439ef57
+  integration_test: d5929033778cc4991a187e4e1a85396fa4f59b3a
+
+PODFILE CHECKSUM: 11f01f28c4100c171712a3ce66247b8d077a9f03
+
+COCOAPODS: 1.16.2
