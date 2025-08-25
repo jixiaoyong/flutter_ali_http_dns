@@ -8,24 +8,20 @@ part of 'proxy_config.dart';
 
 _$ProxyConfigImpl _$$ProxyConfigImplFromJson(Map<String, dynamic> json) =>
     _$ProxyConfigImpl(
-      port: (json['port'] as num?)?.toInt() ?? 4041,
-      portMap: (json['portMap'] as Map<String, dynamic>?)?.map(
-            (k, e) => MapEntry(k, (e as num).toInt()),
-          ) ??
-          const {},
-      fixedDomain: (json['fixedDomain'] as Map<String, dynamic>?)?.map(
-            (k, e) => MapEntry(k, e as String),
-          ) ??
-          const {},
+      portPool: (json['portPool'] as List<dynamic>?)
+          ?.map((e) => (e as num).toInt())
+          .toList(),
+      startPort: (json['startPort'] as num?)?.toInt(),
+      endPort: (json['endPort'] as num?)?.toInt(),
       enabled: json['enabled'] as bool? ?? true,
       host: json['host'] as String? ?? 'localhost',
     );
 
 Map<String, dynamic> _$$ProxyConfigImplToJson(_$ProxyConfigImpl instance) =>
     <String, dynamic>{
-      'port': instance.port,
-      'portMap': instance.portMap,
-      'fixedDomain': instance.fixedDomain,
+      'portPool': instance.portPool,
+      'startPort': instance.startPort,
+      'endPort': instance.endPort,
       'enabled': instance.enabled,
       'host': instance.host,
     };

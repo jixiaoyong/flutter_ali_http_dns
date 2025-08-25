@@ -79,28 +79,26 @@ void main() {
 
     test('should create ProxyConfig with default values', () {
       final config = ProxyConfig();
-
-      expect(config.port, equals(4041));
-      expect(config.host, equals('localhost'));
+      expect(config.portPool, isNull);
+      expect(config.startPort, isNull);
+      expect(config.endPort, isNull);
       expect(config.enabled, isTrue);
-      expect(config.portMap, isEmpty);
-      expect(config.fixedDomain, isEmpty);
+      expect(config.host, equals('localhost'));
     });
 
     test('should create ProxyConfig with custom values', () {
       final config = ProxyConfig(
-        port: 8080,
-        portMap: {'4041': 7350, '4042': 7349},
-        fixedDomain: {'4041': 'api.game-service.com', '4042': 'chat.game-service.com'},
+        portPool: [4041, 4042],
+        startPort: 4043,
+        endPort: 4050,
         enabled: false,
         host: '127.0.0.1',
       );
-
-      expect(config.port, equals(8080));
-      expect(config.host, equals('127.0.0.1'));
+      expect(config.portPool, equals([4041, 4042]));
+      expect(config.startPort, equals(4043));
+      expect(config.endPort, equals(4050));
       expect(config.enabled, isFalse);
-      expect(config.portMap, equals({'4041': 7350, '4042': 7349}));
-      expect(config.fixedDomain, equals({'4041': 'api.game-service.com', '4042': 'chat.game-service.com'}));
+      expect(config.host, equals('127.0.0.1'));
     });
 
     test('should serialize DnsConfig to JSON', () {
@@ -132,19 +130,20 @@ void main() {
 
     test('should serialize ProxyConfig to JSON', () {
       final config = ProxyConfig(
-        port: 8080,
-        portMap: {'4041': 7350, '4042': 7349},
-        fixedDomain: {'4041': 'api.game-service.com', '4042': 'chat.game-service.com'},
-        enabled: true,
-        host: 'localhost',
+        portPool: [4041, 4042],
+        startPort: 4043,
+        endPort: 4050,
+        enabled: false,
+        host: '127.0.0.1',
       );
 
       final json = config.toJson();
-      expect(json['port'], equals(8080));
-      expect(json['portMap'], equals({'4041': 7350, '4042': 7349}));
-      expect(json['fixedDomain'], equals({'4041': 'api.game-service.com', '4042': 'chat.game-service.com'}));
-      expect(json['enabled'], isTrue);
-      expect(json['host'], equals('localhost'));
+
+      expect(json['portPool'], equals([4041, 4042]));
+      expect(json['startPort'], equals(4043));
+      expect(json['endPort'], equals(4050));
+      expect(json['enabled'], isFalse);
+      expect(json['host'], equals('127.0.0.1'));
     });
 
     test('should deserialize DnsConfig from JSON', () {
@@ -186,19 +185,20 @@ void main() {
 
     test('should deserialize ProxyConfig from JSON', () {
       final json = {
-        'port': 8080,
-        'portMap': {'4041': 7350, '4042': 7349},
-        'fixedDomain': {'4041': 'api.game-service.com', '4042': 'chat.game-service.com'},
-        'enabled': true,
-        'host': 'localhost',
+        'portPool': [4041, 4042],
+        'startPort': 4043,
+        'endPort': 4050,
+        'enabled': false,
+        'host': '127.0.0.1',
       };
 
       final config = ProxyConfig.fromJson(json);
-      expect(config.port, equals(8080));
-      expect(config.portMap, equals({'4041': 7350, '4042': 7349}));
-      expect(config.fixedDomain, equals({'4041': 'api.game-service.com', '4042': 'chat.game-service.com'}));
-      expect(config.enabled, isTrue);
-      expect(config.host, equals('localhost'));
+
+      expect(config.portPool, equals([4041, 4042]));
+      expect(config.startPort, equals(4043));
+      expect(config.endPort, equals(4050));
+      expect(config.enabled, isFalse);
+      expect(config.host, equals('127.0.0.1'));
     });
 
     test('should handle DnsConfig equality', () {
@@ -220,15 +220,19 @@ void main() {
 
     test('should handle ProxyConfig equality', () {
       final config1 = ProxyConfig(
-        port: 8080,
-        portMap: {'4041': 7350},
-        fixedDomain: {'4041': 'api.game-service.com'},
+        portPool: [4041, 4042],
+        startPort: 4043,
+        endPort: 4050,
+        enabled: false,
+        host: '127.0.0.1',
       );
-      
+
       final config2 = ProxyConfig(
-        port: 8080,
-        portMap: {'4041': 7350},
-        fixedDomain: {'4041': 'api.game-service.com'},
+        portPool: [4041, 4042],
+        startPort: 4043,
+        endPort: 4050,
+        enabled: false,
+        host: '127.0.0.1',
       );
 
       expect(config1, equals(config2));
@@ -258,19 +262,34 @@ void main() {
     });
 
     test('should copy ProxyConfig with changes', () {
-      final original = ProxyConfig();
-
-      final modified = original.copyWith(
-        port: 8080,
-        portMap: {'4041': 7350},
-        fixedDomain: {'4041': 'api.game-service.com'},
+      final original = ProxyConfig(
+        portPool: [4041],
+        startPort: 4042,
+        endPort: 4045,
+        enabled: true,
+        host: 'localhost',
       );
 
-      expect(modified.port, equals(8080));
-      expect(modified.portMap, equals({'4041': 7350}));
-      expect(modified.fixedDomain, equals({'4041': 'api.game-service.com'}));
-      expect(modified.host, equals(original.host));
-      expect(modified.enabled, equals(original.enabled));
+      final copied = original.copyWith(
+        portPool: [4043, 4044],
+        startPort: 4045,
+        endPort: 4050,
+        enabled: false,
+        host: '127.0.0.1',
+      );
+
+      expect(copied.portPool, equals([4043, 4044]));
+      expect(copied.startPort, equals(4045));
+      expect(copied.endPort, equals(4050));
+      expect(copied.enabled, isFalse);
+      expect(copied.host, equals('127.0.0.1'));
+
+      // Original should remain unchanged
+      expect(original.portPool, equals([4041]));
+      expect(original.startPort, equals(4042));
+      expect(original.endPort, equals(4045));
+      expect(original.enabled, isTrue);
+      expect(original.host, equals('localhost'));
     });
   });
 }

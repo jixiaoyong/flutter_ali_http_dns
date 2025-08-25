@@ -20,14 +20,16 @@ ProxyConfig _$ProxyConfigFromJson(Map<String, dynamic> json) {
 
 /// @nodoc
 mixin _$ProxyConfig {
-  /// 代理服务器端口
-  int get port => throw _privateConstructorUsedError;
+  /// 端口池配置（可选，如果指定则优先使用）
+  List<int>? get portPool => throw _privateConstructorUsedError;
 
-  /// 端口映射配置
-  Map<String, int> get portMap => throw _privateConstructorUsedError;
+  /// 自动分配的起始端口（默认4041）
+  int? get startPort => throw _privateConstructorUsedError;
 
-  /// 固定域名映射
-  Map<String, String> get fixedDomain => throw _privateConstructorUsedError;
+  /// 自动分配的结束端口（可选，必须大于startPort）
+  /// 如果未指定，则使用 startPort + 100
+  /// 如果指定范围不足，会自动突破范围寻找可用端口
+  int? get endPort => throw _privateConstructorUsedError;
 
   /// 是否启用代理
   bool get enabled => throw _privateConstructorUsedError;
@@ -48,9 +50,9 @@ abstract class $ProxyConfigCopyWith<$Res> {
       _$ProxyConfigCopyWithImpl<$Res, ProxyConfig>;
   @useResult
   $Res call(
-      {int port,
-      Map<String, int> portMap,
-      Map<String, String> fixedDomain,
+      {List<int>? portPool,
+      int? startPort,
+      int? endPort,
       bool enabled,
       String host});
 }
@@ -68,25 +70,25 @@ class _$ProxyConfigCopyWithImpl<$Res, $Val extends ProxyConfig>
   @pragma('vm:prefer-inline')
   @override
   $Res call({
-    Object? port = null,
-    Object? portMap = null,
-    Object? fixedDomain = null,
+    Object? portPool = freezed,
+    Object? startPort = freezed,
+    Object? endPort = freezed,
     Object? enabled = null,
     Object? host = null,
   }) {
     return _then(_value.copyWith(
-      port: null == port
-          ? _value.port
-          : port // ignore: cast_nullable_to_non_nullable
-              as int,
-      portMap: null == portMap
-          ? _value.portMap
-          : portMap // ignore: cast_nullable_to_non_nullable
-              as Map<String, int>,
-      fixedDomain: null == fixedDomain
-          ? _value.fixedDomain
-          : fixedDomain // ignore: cast_nullable_to_non_nullable
-              as Map<String, String>,
+      portPool: freezed == portPool
+          ? _value.portPool
+          : portPool // ignore: cast_nullable_to_non_nullable
+              as List<int>?,
+      startPort: freezed == startPort
+          ? _value.startPort
+          : startPort // ignore: cast_nullable_to_non_nullable
+              as int?,
+      endPort: freezed == endPort
+          ? _value.endPort
+          : endPort // ignore: cast_nullable_to_non_nullable
+              as int?,
       enabled: null == enabled
           ? _value.enabled
           : enabled // ignore: cast_nullable_to_non_nullable
@@ -108,9 +110,9 @@ abstract class _$$ProxyConfigImplCopyWith<$Res>
   @override
   @useResult
   $Res call(
-      {int port,
-      Map<String, int> portMap,
-      Map<String, String> fixedDomain,
+      {List<int>? portPool,
+      int? startPort,
+      int? endPort,
       bool enabled,
       String host});
 }
@@ -126,25 +128,25 @@ class __$$ProxyConfigImplCopyWithImpl<$Res>
   @pragma('vm:prefer-inline')
   @override
   $Res call({
-    Object? port = null,
-    Object? portMap = null,
-    Object? fixedDomain = null,
+    Object? portPool = freezed,
+    Object? startPort = freezed,
+    Object? endPort = freezed,
     Object? enabled = null,
     Object? host = null,
   }) {
     return _then(_$ProxyConfigImpl(
-      port: null == port
-          ? _value.port
-          : port // ignore: cast_nullable_to_non_nullable
-              as int,
-      portMap: null == portMap
-          ? _value._portMap
-          : portMap // ignore: cast_nullable_to_non_nullable
-              as Map<String, int>,
-      fixedDomain: null == fixedDomain
-          ? _value._fixedDomain
-          : fixedDomain // ignore: cast_nullable_to_non_nullable
-              as Map<String, String>,
+      portPool: freezed == portPool
+          ? _value._portPool
+          : portPool // ignore: cast_nullable_to_non_nullable
+              as List<int>?,
+      startPort: freezed == startPort
+          ? _value.startPort
+          : startPort // ignore: cast_nullable_to_non_nullable
+              as int?,
+      endPort: freezed == endPort
+          ? _value.endPort
+          : endPort // ignore: cast_nullable_to_non_nullable
+              as int?,
       enabled: null == enabled
           ? _value.enabled
           : enabled // ignore: cast_nullable_to_non_nullable
@@ -161,45 +163,38 @@ class __$$ProxyConfigImplCopyWithImpl<$Res>
 @JsonSerializable()
 class _$ProxyConfigImpl implements _ProxyConfig {
   const _$ProxyConfigImpl(
-      {this.port = 4041,
-      final Map<String, int> portMap = const {},
-      final Map<String, String> fixedDomain = const {},
+      {final List<int>? portPool,
+      this.startPort,
+      this.endPort,
       this.enabled = true,
       this.host = 'localhost'})
-      : _portMap = portMap,
-        _fixedDomain = fixedDomain;
+      : _portPool = portPool;
 
   factory _$ProxyConfigImpl.fromJson(Map<String, dynamic> json) =>
       _$$ProxyConfigImplFromJson(json);
 
-  /// 代理服务器端口
-  @override
-  @JsonKey()
-  final int port;
+  /// 端口池配置（可选，如果指定则优先使用）
+  final List<int>? _portPool;
 
-  /// 端口映射配置
-  final Map<String, int> _portMap;
-
-  /// 端口映射配置
+  /// 端口池配置（可选，如果指定则优先使用）
   @override
-  @JsonKey()
-  Map<String, int> get portMap {
-    if (_portMap is EqualUnmodifiableMapView) return _portMap;
+  List<int>? get portPool {
+    final value = _portPool;
+    if (value == null) return null;
+    if (_portPool is EqualUnmodifiableListView) return _portPool;
     // ignore: implicit_dynamic_type
-    return EqualUnmodifiableMapView(_portMap);
+    return EqualUnmodifiableListView(value);
   }
 
-  /// 固定域名映射
-  final Map<String, String> _fixedDomain;
-
-  /// 固定域名映射
+  /// 自动分配的起始端口（默认4041）
   @override
-  @JsonKey()
-  Map<String, String> get fixedDomain {
-    if (_fixedDomain is EqualUnmodifiableMapView) return _fixedDomain;
-    // ignore: implicit_dynamic_type
-    return EqualUnmodifiableMapView(_fixedDomain);
-  }
+  final int? startPort;
+
+  /// 自动分配的结束端口（可选，必须大于startPort）
+  /// 如果未指定，则使用 startPort + 100
+  /// 如果指定范围不足，会自动突破范围寻找可用端口
+  @override
+  final int? endPort;
 
   /// 是否启用代理
   @override
@@ -213,7 +208,7 @@ class _$ProxyConfigImpl implements _ProxyConfig {
 
   @override
   String toString() {
-    return 'ProxyConfig(port: $port, portMap: $portMap, fixedDomain: $fixedDomain, enabled: $enabled, host: $host)';
+    return 'ProxyConfig(portPool: $portPool, startPort: $startPort, endPort: $endPort, enabled: $enabled, host: $host)';
   }
 
   @override
@@ -221,10 +216,10 @@ class _$ProxyConfigImpl implements _ProxyConfig {
     return identical(this, other) ||
         (other.runtimeType == runtimeType &&
             other is _$ProxyConfigImpl &&
-            (identical(other.port, port) || other.port == port) &&
-            const DeepCollectionEquality().equals(other._portMap, _portMap) &&
-            const DeepCollectionEquality()
-                .equals(other._fixedDomain, _fixedDomain) &&
+            const DeepCollectionEquality().equals(other._portPool, _portPool) &&
+            (identical(other.startPort, startPort) ||
+                other.startPort == startPort) &&
+            (identical(other.endPort, endPort) || other.endPort == endPort) &&
             (identical(other.enabled, enabled) || other.enabled == enabled) &&
             (identical(other.host, host) || other.host == host));
   }
@@ -233,9 +228,9 @@ class _$ProxyConfigImpl implements _ProxyConfig {
   @override
   int get hashCode => Object.hash(
       runtimeType,
-      port,
-      const DeepCollectionEquality().hash(_portMap),
-      const DeepCollectionEquality().hash(_fixedDomain),
+      const DeepCollectionEquality().hash(_portPool),
+      startPort,
+      endPort,
       enabled,
       host);
 
@@ -255,9 +250,9 @@ class _$ProxyConfigImpl implements _ProxyConfig {
 
 abstract class _ProxyConfig implements ProxyConfig {
   const factory _ProxyConfig(
-      {final int port,
-      final Map<String, int> portMap,
-      final Map<String, String> fixedDomain,
+      {final List<int>? portPool,
+      final int? startPort,
+      final int? endPort,
       final bool enabled,
       final String host}) = _$ProxyConfigImpl;
 
@@ -266,16 +261,18 @@ abstract class _ProxyConfig implements ProxyConfig {
 
   @override
 
-  /// 代理服务器端口
-  int get port;
+  /// 端口池配置（可选，如果指定则优先使用）
+  List<int>? get portPool;
   @override
 
-  /// 端口映射配置
-  Map<String, int> get portMap;
+  /// 自动分配的起始端口（默认4041）
+  int? get startPort;
   @override
 
-  /// 固定域名映射
-  Map<String, String> get fixedDomain;
+  /// 自动分配的结束端口（可选，必须大于startPort）
+  /// 如果未指定，则使用 startPort + 100
+  /// 如果指定范围不足，会自动突破范围寻找可用端口
+  int? get endPort;
   @override
 
   /// 是否启用代理

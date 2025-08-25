@@ -1,4 +1,3 @@
-
 import 'dart:io';
 
 import 'flutter_ali_http_dns_platform_interface.dart';
@@ -8,18 +7,27 @@ import 'src/services/dns_resolver.dart';
 import 'src/services/proxy_server.dart';
 import 'src/utils/logger.dart';
 
+export 'src/models/dns_config.dart';
+export 'src/models/proxy_config.dart';
+export 'src/models/port_mapping.dart';
+export 'src/utils/logger.dart';
+
 /// Flutter 阿里云 HttpDNS 插件主类
 class FlutterAliHttpDns {
   static final FlutterAliHttpDns _instance = FlutterAliHttpDns._internal();
   factory FlutterAliHttpDns() => _instance;
   FlutterAliHttpDns._internal();
 
-  final FlutterAliHttpDnsPlatform _platform = FlutterAliHttpDnsPlatform.instance;
+  final FlutterAliHttpDnsPlatform _platform =
+      FlutterAliHttpDnsPlatform.instance;
   final DnsResolver _dnsResolver = DnsResolver();
   ProxyServer? _proxyServer;
 
   bool _isInitialized = false;
   bool _isProxyRunning = false;
+
+  // 启动锁，防止并发启动
+  Future<bool>? _startProxyFuture;
 
   /// 获取插件实例
   static FlutterAliHttpDns get instance => _instance;
@@ -41,17 +49,18 @@ class FlutterAliHttpDns {
   }
 
   /// 初始化 DNS 服务
-  /// 
+  ///
   /// [config] DNS 配置参数
   /// 返回初始化是否成功
   Future<bool> initialize(DnsConfig config) async {
     try {
       Logger.info('Initializing DNS service with config: ${config.accountId}');
-      Logger.debug('Full config details: accountId=${config.accountId}, accessKeyId=${config.accessKeyId}, enableCache=${config.enableCache}');
-      
+      Logger.debug(
+          'Full config details: accountId=${config.accountId}, accessKeyId=${config.accessKeyId}, enableCache=${config.enableCache}');
+
       final result = await _platform.initializeDns(config);
       Logger.info('Platform initialization result: $result');
-      
+
       if (result) {
         _isInitialized = true;
         await _dnsResolver.initialize(config);
@@ -67,7 +76,7 @@ class FlutterAliHttpDns {
   }
 
   /// 解析域名
-  /// 
+  ///
   /// [domain] 要解析的域名
   /// 返回解析后的 IP 地址，如果解析失败则返回原域名
   Future<String> resolveDomain(String domain) async {
@@ -95,35 +104,95 @@ class FlutterAliHttpDns {
   }
 
   /// 启动代理服务器
-  /// 
+  ///
   /// [config] 代理配置参数
   /// 返回启动是否成功
-  Future<bool> startProxy(ProxyConfig config) async {
+  Future<bool> startProxy({ProxyConfig config = const ProxyConfig()}) async {
     if (!_isInitialized) {
       throw StateError('DNS service not initialized. Call initialize() first.');
     }
 
+    // 如果代理已经在运行，直接返回成功
+    if (_isProxyRunning && _proxyServer != null && _proxyServer!.isRunning) {
+      Logger.info('Proxy server is already running');
+      return true;
+    }
+
+    // 如果正在启动中，等待当前启动完成
+    if (_startProxyFuture != null) {
+      Logger.info('Proxy server is starting, waiting for completion...');
+      try {
+        final result = await _startProxyFuture!;
+        Logger.info('Previous start attempt completed with result: $result');
+        return result;
+      } catch (e) {
+        Logger.error('Previous start attempt failed', e);
+        // 重置启动锁，允许重试
+        _startProxyFuture = null;
+      }
+    }
+
+    // 创建新的启动任务
+    _startProxyFuture = _startProxyInternal(config);
+
     try {
-      Logger.info('Starting proxy server on port ${config.port}');
-      // 创建新的代理服务器实例
-      _proxyServer = ProxyServer(config: config);
-      await _proxyServer!.start();
+      final result = await _startProxyFuture!;
+      return result;
+    } finally {
+      // 清理启动锁
+      _startProxyFuture = null;
+    }
+  }
+
+  /// 内部启动方法 - 启动默认代理
+  Future<bool> _startProxyInternal(ProxyConfig config) async {
+    try {
+      Logger.info('Starting default proxy server with smart port allocation');
+
+      // 如果已有代理服务器，先停止
+      if (_proxyServer != null) {
+        Logger.info('Stopping existing proxy server');
+        await _proxyServer!.stop();
+        _proxyServer = null;
+        _isProxyRunning = false;
+      }
+
+      // 启动默认代理服务器（用于Dio等普通场景）
+      _proxyServer = await ProxyServer.startDefault(config);
       _isProxyRunning = true;
-      Logger.info('Proxy server started successfully');
+
+      final address = _proxyServer!.getAddress();
+      Logger.info('Default proxy server started successfully on $address');
       return true;
     } catch (e) {
-      Logger.error('Failed to start proxy server', e);
+      Logger.error('Failed to start default proxy server', e);
+      _isProxyRunning = false;
+      _proxyServer = null;
       return false;
     }
   }
 
   /// 停止代理服务器
-  /// 
+  ///
   /// 返回停止是否成功
   Future<bool> stopProxy() async {
     try {
       Logger.info('Stopping proxy server');
+
+      // 清理启动锁
+      _startProxyFuture = null;
+
       if (_proxyServer != null) {
+        // 获取所有监听的端口
+        final listeningPorts = _proxyServer!.getListeningPorts();
+        Logger.info('Deregistering all listening ports: $listeningPorts');
+
+        // 取消注册所有端口
+        for (final port in listeningPorts) {
+          await _proxyServer!.deregisterPort(port);
+        }
+
+        // 停止代理服务器
         await _proxyServer!.stop();
         _proxyServer = null;
       }
@@ -137,7 +206,7 @@ class FlutterAliHttpDns {
   }
 
   /// 获取代理地址
-  /// 
+  ///
   /// 返回代理服务器地址字符串，格式为 "host:port"
   Future<String?> getProxyAddress() async {
     if (!_isProxyRunning || _proxyServer == null) {
@@ -147,8 +216,203 @@ class FlutterAliHttpDns {
     return _proxyServer!.getAddress();
   }
 
+  /// 获取所有代理地址
+  ///
+  /// 返回所有代理服务器地址列表，格式为 ["host:port1", "host:port2", ...]
+  Future<List<String>> getAllProxyAddresses() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return [];
+    }
+
+    return _proxyServer!.getAllAddresses();
+  }
+
+  /// 获取主要端口（第一个端口）
+  ///
+  /// 返回主要代理端口，适用于单端口场景
+  Future<int?> getMainPort() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return null;
+    }
+
+    final ports = _proxyServer!.allocatedPorts;
+    return ports.isNotEmpty ? ports.first : null;
+  }
+
+  /// 获取实际使用的端口列表
+  ///
+  /// 返回当前实际使用的端口列表
+  Future<List<int>> getActualPorts() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return [];
+    }
+
+    return _proxyServer!.allocatedPorts;
+  }
+
+  /// 注册端口映射（自动查找可用端口）
+  ///
+  /// [targetPort] 目标端口（可选，null表示使用原始端口）
+  /// [targetDomain] 目标域名
+  /// [name] 映射名称（可选）
+  /// [description] 描述信息（可选）
+  /// 返回注册成功的本地端口，失败时返回null
+  Future<int?> registerMapping({
+    int? targetPort,
+    required String targetDomain,
+    String? name,
+    String? description,
+  }) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      Logger.warning('Proxy server is not running');
+      return null;
+    }
+
+    try {
+      // 自动查找可用端口
+      final availablePort = await _findAvailablePort();
+      if (availablePort == null) {
+        Logger.error('No available port found for mapping');
+        return null;
+      }
+
+      Logger.info('Found available port $availablePort for mapping');
+
+      // 注册端口监听
+      final portRegistered = await registerPort(availablePort);
+      if (!portRegistered) {
+        Logger.error('Failed to register port $availablePort for listening');
+        return null;
+      }
+
+      // 注册端口映射
+      final mappingRegistered = await _proxyServer!.registerMapping(
+        localPort: availablePort,
+        targetPort: targetPort,
+        targetDomain: targetDomain,
+        name: name,
+        description: description,
+      );
+
+      if (mappingRegistered) {
+        Logger.info(
+            'Successfully registered mapping for port $availablePort -> $targetDomain:${targetPort ?? availablePort}');
+        return availablePort;
+      } else {
+        // 如果映射注册失败，取消端口监听
+        await deregisterPort(availablePort);
+        Logger.error('Failed to register mapping for port $availablePort');
+        return null;
+      }
+    } catch (e) {
+      Logger.error('Error registering mapping', e);
+      return null;
+    }
+  }
+
+  /// 移除端口映射
+  ///
+  /// [localPort] 本地端口
+  /// 返回移除是否成功
+  Future<bool> removeMapping(int localPort) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      Logger.warning('Proxy server is not running');
+      return false;
+    }
+
+    try {
+      // 首先移除端口映射
+      final mappingRemoved = await _proxyServer!.removeMapping(localPort);
+
+      if (mappingRemoved) {
+        // 然后取消端口监听
+        final portDeregistered = await deregisterPort(localPort);
+        if (portDeregistered) {
+          Logger.info(
+              'Successfully removed mapping and deregistered port $localPort');
+        } else {
+          Logger.warning(
+              'Mapping removed but failed to deregister port $localPort');
+        }
+        return true;
+      } else {
+        Logger.error('Failed to remove mapping for port $localPort');
+        return false;
+      }
+    } catch (e) {
+      Logger.error('Error removing mapping for port $localPort', e);
+      return false;
+    }
+  }
+
+  /// 获取端口映射
+  ///
+  /// [localPort] 本地端口
+  /// 返回端口映射信息
+  Future<Map<String, dynamic>?> getMapping(int localPort) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return null;
+    }
+
+    final mapping = _proxyServer!.getMapping(localPort);
+    if (mapping == null) {
+      return null;
+    }
+
+    return {
+      'localPort': mapping.localPort,
+      'targetPort': mapping.targetPort,
+      'targetDomain': mapping.targetDomain,
+      'createdAt': mapping.createdAt?.toIso8601String(),
+      'isActive': mapping.isActive,
+      'name': mapping.name,
+      'description': mapping.description,
+    };
+  }
+
+  /// 获取所有端口映射
+  ///
+  /// 返回所有端口映射信息
+  Future<Map<int, Map<String, dynamic>>> getAllMappings() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return {};
+    }
+
+    final mappings = _proxyServer!.getAllMappings();
+    final result = <int, Map<String, dynamic>>{};
+
+    for (final entry in mappings.entries) {
+      final mapping = entry.value;
+      result[entry.key] = {
+        'localPort': mapping.localPort,
+        'targetPort': mapping.targetPort,
+        'targetDomain': mapping.targetDomain,
+        'createdAt': mapping.createdAt?.toIso8601String(),
+        'isActive': mapping.isActive,
+        'name': mapping.name,
+        'description': mapping.description,
+      };
+    }
+
+    return result;
+  }
+
+  /// 检查端口是否可用
+  ///
+  /// [port] 端口号
+  /// 返回端口是否可用
+  Future<bool> isPortAvailable(int port) async {
+    try {
+      final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+      await socket.close();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   /// 获取代理配置字符串
-  /// 
+  ///
   /// 返回用于 HttpClient 配置的代理字符串
   Future<String?> getProxyConfigString() async {
     if (!_isProxyRunning) {
@@ -160,15 +424,120 @@ class FlutterAliHttpDns {
   }
 
   /// 检查代理服务器状态
-  /// 
+  ///
   /// 返回代理服务器是否正在运行
   Future<bool> checkProxyStatus() async {
     _isProxyRunning = _proxyServer?.isRunning ?? false;
     return _isProxyRunning;
   }
 
+  /// 获取端口占用详细信息
+  ///
+  /// [port] 要检查的端口号
+  /// 返回端口占用信息，包括进程ID、进程名称等
+  static Future<PortInfo> getPortInfo(int port) async {
+    return await ProxyServer.getPortInfo(port);
+  }
+
+  /// 获取当前应用进程ID
+  ///
+  /// 返回当前应用的进程ID
+  static int getCurrentProcessId() {
+    // 直接调用静态方法获取当前 PID
+    return ProxyServer.getCurrentPid();
+  }
+
+  /// 检查端口是否被自己的应用占用
+  ///
+  /// [port] 要检查的端口号
+  /// 返回 true 如果是被自己的应用占用，false 如果是被其他程序占用或端口可用
+  static Future<bool> isPortUsedByOwnApp(int port) async {
+    final portInfo = await getPortInfo(port);
+    return portInfo.isOwnProcess;
+  }
+
+  /// 获取当前代理的可用端口（内部使用）
+  ///
+  /// 返回当前代理服务器监听的端口列表
+  /// 注意：用户通常不需要手动调用此方法，registerMapping会自动管理端口
+  Future<List<int>> getAvailablePorts() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return [];
+    }
+
+    return _proxyServer!.getListeningPorts();
+  }
+
+  /// 注册端口监听（内部使用）
+  ///
+  /// [port] 要监听的端口
+  /// 返回注册是否成功
+  /// 注意：用户通常不需要手动调用此方法，registerMapping会自动管理端口
+  Future<bool> registerPort(int port) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      Logger.warning('Proxy server is not running');
+      return false;
+    }
+
+    return await _proxyServer!.registerPort(port);
+  }
+
+  /// 取消注册端口监听（内部使用）
+  ///
+  /// [port] 要取消监听的端口
+  /// 返回取消注册是否成功
+  /// 注意：用户通常不需要手动调用此方法，removeMapping会自动管理端口
+  Future<bool> deregisterPort(int port) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      Logger.warning('Proxy server is not running');
+      return false;
+    }
+
+    return await _proxyServer!.deregisterPort(port);
+  }
+
+  /// 检查端口是否正在被监听（内部使用）
+  ///
+  /// [port] 要检查的端口
+  /// 返回端口是否正在被监听
+  /// 注意：用户通常不需要手动调用此方法，主要用于内部端口管理
+  Future<bool> isPortListening(int port) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return false;
+    }
+
+    return _proxyServer!.isPortListening(port);
+  }
+
+  /// 获取当前代理服务器实例
+  ///
+  /// 返回当前运行的代理服务器实例，如果没有则返回 null
+  ProxyServer? get currentProxyServer => _proxyServer;
+
+  /// 获取指定端口的代理服务器实例
+  ///
+  /// [port] 端口号
+  /// 返回指定端口的代理服务器实例，如果没有则返回 null
+  static ProxyServer? getProxyServerByPort(int port) {
+    return ProxyServer.getInstanceByPort(port);
+  }
+
+  /// 停止所有代理服务器实例
+  ///
+  /// 停止当前应用中的所有代理服务器实例
+  static Future<void> stopAllProxyServers() async {
+    await ProxyServer.stopAll();
+  }
+
+  /// 获取所有运行的代理服务器端口
+  ///
+  /// 返回当前应用中所有运行的代理服务器端口列表
+  static List<int> getRunningProxyPorts() {
+    return ProxyServer.getRunningPorts();
+  }
+
   /// 为 HttpClient 配置代理
-  /// 
+  ///
   /// [client] HttpClient 实例
   /// 配置 HttpClient 使用插件提供的代理
   Future<void> configureHttpClient(HttpClient client) async {
@@ -184,7 +553,7 @@ class FlutterAliHttpDns {
   }
 
   /// 获取 Dio 代理配置
-  /// 
+  ///
   /// 返回用于 Dio 配置的代理设置
   Future<Map<String, dynamic>?> getDioProxyConfig() async {
     if (!_isProxyRunning) {
@@ -205,7 +574,7 @@ class FlutterAliHttpDns {
   }
 
   /// 清理资源
-  /// 
+  ///
   /// 停止代理服务器并清理相关资源
   Future<void> dispose() async {
     Logger.info('Disposing plugin resources');
@@ -215,5 +584,62 @@ class FlutterAliHttpDns {
     await _proxyServer?.dispose();
     _isInitialized = false;
     Logger.info('Plugin resources disposed');
+  }
+
+  /// 自动查找可用端口
+  Future<int?> _findAvailablePort() async {
+    // 首先尝试使用配置中的端口池
+    if (_proxyServer!.config.portPool != null &&
+        _proxyServer!.config.portPool!.isNotEmpty) {
+      for (final port in _proxyServer!.config.portPool!) {
+        if (await isPortAvailable(port) && !await isPortListening(port)) {
+          return port;
+        }
+      }
+    }
+
+    // 如果没有可用端口池，使用配置的端口范围
+    final startPort = _proxyServer!.config.startPort ?? 4041;
+    final endPort = _proxyServer!.config.endPort ?? (startPort + 100);
+
+    // 验证端口范围
+    if (endPort <= startPort) {
+      Logger.error(
+          'Invalid port range: endPort ($endPort) must be greater than startPort ($startPort)');
+      return null;
+    }
+
+    // 首先在指定范围内寻找
+    for (int port = startPort; port <= endPort; port++) {
+      if (await isPortAvailable(port) && !await isPortListening(port)) {
+        return port;
+      }
+    }
+
+    // 如果指定范围内没有可用端口，向上突破范围寻找
+    Logger.warning(
+        'No available ports in range $startPort-$endPort, expanding search upward');
+    for (int port = endPort + 1; port <= endPort + 100; port++) {
+      if (await isPortAvailable(port) && !await isPortListening(port)) {
+        Logger.info('Found available port $port outside configured range');
+        return port;
+      }
+    }
+
+    // 如果向上突破也没有，向下突破范围寻找
+    Logger.warning(
+        'No available ports above $endPort, expanding search downward');
+    for (int port = startPort - 1; port >= startPort - 100; port--) {
+      if (port > 0 &&
+          await isPortAvailable(port) &&
+          !await isPortListening(port)) {
+        Logger.info('Found available port $port outside configured range');
+        return port;
+      }
+    }
+
+    Logger.error(
+        'No available ports found in range $startPort-$endPort or nearby ranges');
+    return null;
   }
 }

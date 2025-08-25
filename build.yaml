@@ -1,0 +1,10 @@
+targets:
+  $default:
+    sources:
+      exclude:
+        - ios/**
+        - android/**
+        - example/ios/**
+        - example/android/**
+        - example/ios/.symlinks/**
+        - test/**
