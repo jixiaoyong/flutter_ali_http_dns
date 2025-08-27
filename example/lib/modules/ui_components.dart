@@ -78,7 +78,6 @@ class UIComponents {
     required VoidCallback onTestDomainResolution,
     required VoidCallback onTestHttpClient,
     required VoidCallback onTestDio,
-    required VoidCallback onTestNakamaProxy,
   }) {
     return Card(
       child: Padding(
@@ -98,17 +97,12 @@ class UIComponents {
             const SizedBox(height: 8),
             ElevatedButton(
               onPressed: onTestHttpClient,
-              child: const Text('测试 HttpClient (Dio 场景)'),
+              child: const Text('测试 HttpClient'),
             ),
             const SizedBox(height: 8),
             ElevatedButton(
               onPressed: onTestDio,
-              child: const Text('测试 Dio (Dio 场景)'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: onTestNakamaProxy,
-              child: const Text('测试 Nakama 代理'),
+              child: const Text('测试 Dio'),
             ),
           ],
         ),
@@ -116,16 +110,13 @@ class UIComponents {
     );
   }
 
-  /// 构建端口管理测试卡片
-  static Widget buildPortManagementTestCard({
+  /// 构建高级功能测试卡片
+  static Widget buildAdvancedTestCard({
     required BuildContext context,
     required bool isInitialized,
-    required VoidCallback onTestPortConflict,
-    required VoidCallback onTestDynamicMapping,
-    required VoidCallback onTestPortManagement,
-    required VoidCallback onTestCrossAppIsolation,
     required VoidCallback onTestAdvancedFeatures,
-    required VoidCallback onTestConfigurationOptions,
+    required VoidCallback onTestPerformance,
+    required VoidCallback onTestErrorHandling,
   }) {
     return Card(
       child: Padding(
@@ -134,46 +125,23 @@ class UIComponents {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '端口管理测试',
+              '高级功能测试',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: isInitialized ? onTestPortConflict : null,
-                    child: const Text('测试端口冲突'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: isInitialized ? onTestDynamicMapping : null,
-                    child: const Text('测试动态端口映射'),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: isInitialized ? onTestPortManagement : null,
-              child: const Text('测试端口管理'),
-            ),
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: isInitialized ? onTestCrossAppIsolation : null,
-              child: const Text('测试跨应用隔离'),
-            ),
-            const SizedBox(height: 8),
             ElevatedButton(
               onPressed: isInitialized ? onTestAdvancedFeatures : null,
               child: const Text('测试高级功能'),
             ),
             const SizedBox(height: 8),
             ElevatedButton(
-              onPressed: onTestConfigurationOptions,
-              child: const Text('测试配置选项'),
+              onPressed: isInitialized ? onTestPerformance : null,
+              child: const Text('测试性能'),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: isInitialized ? onTestErrorHandling : null,
+              child: const Text('测试错误处理'),
             ),
           ],
         ),

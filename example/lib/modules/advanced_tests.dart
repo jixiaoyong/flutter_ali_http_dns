@@ -1,5 +1,5 @@
+import 'dart:io';
 import 'package:flutter_ali_http_dns/flutter_ali_http_dns.dart';
-import 'package:flutter_ali_http_dns_example/credentials.dart';
 
 /// 高级功能测试模块 - 负责高级功能、配置选项和性能测试
 class AdvancedTests {
@@ -45,197 +45,210 @@ class AdvancedTests {
       final proxyConfigString = await _dnsService.getProxyConfigString();
       onLogMessage('   Proxy config string: $proxyConfigString');
 
-      // 4. 批量映射操作
-      onLogMessage('4. Testing batch mapping operations...');
+      // 4. 代理配置测试
+      onLogMessage('4. Testing proxy configuration...');
       
       if (isProxyRunning) {
-        // 直接注册多个服务映射
-        final services = [
-          {'name': 'API', 'targetPort': 7350, 'domain': 'api.game-service.com'},
-          {'name': 'Chat', 'targetPort': 7349, 'domain': 'chat.game-service.com'},
-          {'name': 'Auth', 'targetPort': null, 'domain': 'auth.game-service.com'},
-        ];
+        // 获取代理配置
+        final proxyAddress = await _dnsService.getProxyAddress();
+        final http2Address = await _dnsService.getHttp2ProxyAddress();
+        final allAddresses = await _dnsService.getAllProxyAddresses();
+        final dioConfig = await _dnsService.getDioProxyConfig();
         
-        final successfulMappings = <String, int>{};
-        
-        for (final service in services) {
-          final serviceName = service['name'] as String;
-          final targetPort = service['targetPort'] as int?;
-          final domain = service['domain'] as String;
-          
-          final localPort = await _dnsService.registerMapping(
-            targetPort: targetPort,
-            targetDomain: domain,
-            name: serviceName,
-            description: '$serviceName mapping',
-            isSecure: service['isSecure'] as bool? ?? true, // 默认使用安全连接
-          );
-          
-          if (localPort != null) {
-            successfulMappings[serviceName] = localPort;
-            onLogMessage('   Register $serviceName on port $localPort: Success');
-          } else {
-            onLogMessage('   Register $serviceName: Failed');
-          }
-        }
-
-        // 获取所有映射的详细信息
-        final allMappings = await _dnsService.getAllMappings();
-        onLogMessage('   Total mappings: ${allMappings.length}');
-        for (final entry in allMappings.entries) {
-          final mapping = entry.value;
-          onLogMessage('     Port ${entry.key}: ${mapping['targetDomain']}:${mapping['targetPort'] ?? 'original'}');
-        }
-
-        // 批量移除映射
-        for (final entry in successfulMappings.entries) {
-          final serviceName = entry.key;
-          final localPort = entry.value;
-          final success = await _dnsService.removeMapping(localPort);
-          onLogMessage('   Remove $serviceName (port $localPort): ${success ? 'Success' : 'Failed'}');
-        }
+        onLogMessage('   Proxy address: $proxyAddress');
+        onLogMessage('   HTTP/2 address: $http2Address');
+        onLogMessage('   All addresses: ${allAddresses.join(', ')}');
+        onLogMessage('   Dio config: $dioConfig');
       } else {
-        onLogMessage('   Proxy server is not running, skipping batch mapping test');
+        onLogMessage('   Proxy server is not running, skipping proxy config test');
       }
 
-      // 5. 错误处理演示
-      onLogMessage('5. Testing error handling...');
+      // 5. 端口管理测试
+      onLogMessage('5. Testing port management...');
       
-      // 尝试在代理未运行时注册映射
-      if (!isProxyRunning) {
-        try {
-          // 使用一个常见的端口号进行错误测试
-          await _dnsService.registerMapping(
-            targetPort: 7350,
-            targetDomain: 'test.com',
-            isSecure: true, // 测试使用安全连接
-          );
-        } catch (e) {
-          onLogMessage('   Expected error when proxy not running: $e');
-        }
+      if (isProxyRunning) {
+        final actualPorts = await _dnsService.getActualPorts();
+        final mainPort = await _dnsService.getMainPort();
+        final availablePorts = await _dnsService.getAvailablePorts();
+        
+        onLogMessage('   Actual ports: ${actualPorts.join(', ')}');
+        onLogMessage('   Main port: $mainPort');
+        onLogMessage('   Available ports: ${availablePorts.join(', ')}');
       } else {
-        // 如果代理正在运行，测试使用无效端口
-        try {
-          await _dnsService.registerMapping(
-            targetPort: 7350,
-            targetDomain: 'test.com',
-            isSecure: true, // 测试使用安全连接
-          );
-        } catch (e) {
-          onLogMessage('   Expected error for invalid mapping: $e');
-        }
+        onLogMessage('   Proxy server is not running, skipping port management test');
       }
 
-      // 尝试解析无效域名
-      try {
-        await _dnsService.resolveDomain('invalid.domain.test');
-      } catch (e) {
-        onLogMessage('   Expected error for invalid domain: $e');
-      }
-
-      // 6. 性能测试
-      onLogMessage('6. Testing performance...');
+      // 6. 进程信息测试
+      onLogMessage('6. Testing process information...');
       
-      if (isInitialized) {
-        final stopwatch = Stopwatch()..start();
-        
-        // 并发解析多个域名
-        final domains = [
-          'www.taobao.com',
-          'www.douyin.com', 
-          'www.baidu.com',
-          'www.qq.com',
-          'www.weibo.com',
-        ];
-        
-        final futures = domains.map((domain) => _dnsService.resolveDomain(domain));
-        final results = await Future.wait(futures);
-        
-        stopwatch.stop();
-        onLogMessage('   Concurrent resolution of ${domains.length} domains: ${stopwatch.elapsedMilliseconds}ms');
-        for (int i = 0; i < domains.length; i++) {
-          onLogMessage('     ${domains[i]} -> ${results[i]}');
-        }
-      }
+      final currentPid = FlutterAliHttpDns.getCurrentProcessId();
+      onLogMessage('   Current process ID: $currentPid');
 
-      onResultUpdate('高级功能测试完成，请查看日志了解详细信息');
-      onLogMessage('Advanced features test completed successfully!');
+      // 7. 端口信息测试
+      onLogMessage('7. Testing port information...');
+      
+      final port4041Info = await FlutterAliHttpDns.getPortInfo(4041);
+      onLogMessage('   Port 4041 info: ${port4041Info.toString()}');
+
+      final isOwnApp = await FlutterAliHttpDns.isPortUsedByOwnApp(4041);
+      onLogMessage('   Port 4041 used by own app: $isOwnApp');
+
+      onResultUpdate('高级功能测试完成');
+      onLogMessage('Advanced features test completed successfully');
 
     } catch (e) {
-      onResultUpdate('高级功能测试错误: $e');
-      onLogMessage('Advanced features test error: $e');
+      onLogMessage('Advanced features test failed: $e');
+      onResultUpdate('高级功能测试失败: $e');
     }
   }
 
-  /// 测试配置选项
-  Future<void> testConfigurationOptions() async {
-    onLogMessage('Testing different configuration options...');
+  /// 测试性能
+  Future<void> testPerformance() async {
+    onResultUpdate('正在测试性能...');
+    onLogMessage('Testing performance...');
 
     try {
-      // 1. 测试不同的DNS配置
-      onLogMessage('1. Testing different DNS configurations...');
-
-      final dnsConfigs = [
-        DnsConfig(
-          accountId: AliHttpDnsCredentials.accountId,
-          accessKeyId: AliHttpDnsCredentials.accessKeyId,
-          accessKeySecret: AliHttpDnsCredentials.accessKeySecret,
-          enableCache: true,
-          maxCacheSize: 500,
-          enableSpeedTest: true,
-          timeout: 3,
-        ),
-        DnsConfig(
-          accountId: AliHttpDnsCredentials.accountId,
-          accessKeyId: AliHttpDnsCredentials.accessKeyId,
-          accessKeySecret: AliHttpDnsCredentials.accessKeySecret,
-          enableCache: false,
-          enableSpeedTest: false,
-          timeout: 10,
-          preloadDomains: ['www.taobao.com', 'www.douyin.com'],
-        ),
+      // 1. DNS解析性能测试
+      onLogMessage('1. Testing DNS resolution performance...');
+      
+      final testDomains = [
+        'www.google.com',
+        'www.github.com',
+        'www.baidu.com',
+        'www.qq.com',
+        'www.taobao.com',
       ];
 
-      for (int i = 0; i < dnsConfigs.length; i++) {
-        final config = dnsConfigs[i];
-        onLogMessage('   Testing DNS config ${i + 1}:');
-        onLogMessage('     Cache: ${config.enableCache}, Size: ${config.maxCacheSize}');
-        onLogMessage('     Speed test: ${config.enableSpeedTest}, Timeout: ${config.timeout}s');
-        onLogMessage('     Preload domains: ${config.preloadDomains.length}');
+      final stopwatch = Stopwatch()..start();
+      int successCount = 0;
+
+      for (final domain in testDomains) {
+        try {
+          final resolvedIp = await _dnsService.resolveDomain(domain);
+          if (resolvedIp != domain) {
+            successCount++;
+            onLogMessage('   $domain -> $resolvedIp');
+          } else {
+            onLogMessage('   $domain -> (no resolution)');
+          }
+        } catch (e) {
+          onLogMessage('   $domain -> error: $e');
+        }
       }
 
-      // 2. 测试不同的代理配置
-      onLogMessage('2. Testing different proxy configurations...');
+      stopwatch.stop();
+      final duration = stopwatch.elapsedMilliseconds;
+      final successRate = (successCount / testDomains.length * 100).toStringAsFixed(1);
 
-      final proxyConfigs = [
-        ProxyConfig(
-          portPool: [4041],
-          startPort: 4042,
-          endPort: 4045,
-        ),
-        ProxyConfig(
-          portPool: [4041, 4042, 4043],
-          startPort: 4044,
-          endPort: 4050,
-        ),
-        ProxyConfig(
-          startPort: 5000,
-          endPort: 5010,
-        ),
-      ];
+      onLogMessage('   DNS resolution performance:');
+      onLogMessage('     Total domains: ${testDomains.length}');
+      onLogMessage('     Success count: $successCount');
+      onLogMessage('     Success rate: ${successRate}%');
+      onLogMessage('     Total time: ${duration}ms');
+      onLogMessage('     Average time: ${(duration / testDomains.length).toStringAsFixed(1)}ms');
 
-      for (int i = 0; i < proxyConfigs.length; i++) {
-        final config = proxyConfigs[i];
-        onLogMessage('   Testing proxy config ${i + 1}:');
-        onLogMessage('     Port pool: ${config.portPool?.length ?? 0} ports');
-        onLogMessage('     Port range: ${config.startPort}-${config.endPort}');
-        onLogMessage('     Host: ${config.host}');
+      // 2. 代理连接性能测试
+      onLogMessage('2. Testing proxy connection performance...');
+      
+      if (isProxyRunning) {
+        final proxyAddress = await _dnsService.getProxyAddress();
+        if (proxyAddress != null) {
+          final parts = proxyAddress.split(':');
+          if (parts.length == 2) {
+            final host = parts[0];
+            final port = int.tryParse(parts[1]);
+            
+            if (port != null) {
+              final connectionStopwatch = Stopwatch()..start();
+              int connectionSuccessCount = 0;
+              final connectionCount = 5;
+
+              for (int i = 0; i < connectionCount; i++) {
+                try {
+                  final socket = await Socket.connect(host, port);
+                  socket.destroy();
+                  connectionSuccessCount++;
+                  onLogMessage('   Connection $i: Success');
+                } catch (e) {
+                  onLogMessage('   Connection $i: Failed - $e');
+                }
+              }
+
+              connectionStopwatch.stop();
+              final connectionDuration = connectionStopwatch.elapsedMilliseconds;
+              final connectionSuccessRate = (connectionSuccessCount / connectionCount * 100).toStringAsFixed(1);
+
+              onLogMessage('   Proxy connection performance:');
+              onLogMessage('     Total connections: $connectionCount');
+              onLogMessage('     Success count: $connectionSuccessCount');
+              onLogMessage('     Success rate: ${connectionSuccessRate}%');
+              onLogMessage('     Total time: ${connectionDuration}ms');
+              onLogMessage('     Average time: ${(connectionDuration / connectionCount).toStringAsFixed(1)}ms');
+            }
+          }
+        }
+      } else {
+        onLogMessage('   Proxy server is not running, skipping connection performance test');
       }
 
-      onLogMessage('Configuration options test completed!');
+      onResultUpdate('性能测试完成');
+      onLogMessage('Performance test completed successfully');
 
     } catch (e) {
-      onLogMessage('Configuration options test error: $e');
+      onLogMessage('Performance test failed: $e');
+      onResultUpdate('性能测试失败: $e');
+    }
+  }
+
+  /// 测试错误处理
+  Future<void> testErrorHandling() async {
+    onResultUpdate('正在测试错误处理...');
+    onLogMessage('Testing error handling...');
+
+    try {
+      // 1. 无效域名测试
+      onLogMessage('1. Testing invalid domain resolution...');
+      
+      final invalidDomains = [
+        'invalid.domain.test',
+        'nonexistent.domain.local',
+        'test.invalid',
+      ];
+
+      for (final domain in invalidDomains) {
+        try {
+          final resolvedIp = await _dnsService.resolveDomain(domain);
+          onLogMessage('   $domain -> $resolvedIp (should be original domain)');
+        } catch (e) {
+          onLogMessage('   $domain -> error: $e');
+        }
+      }
+
+      // 2. 代理状态检查
+      onLogMessage('2. Testing proxy status check...');
+      
+      final proxyStatus = await _dnsService.checkProxyStatus();
+      onLogMessage('   Proxy status: $proxyStatus');
+
+      // 3. 端口检查
+      onLogMessage('3. Testing port checks...');
+      
+      final invalidPorts = [-1, 0, 65536, 99999];
+      for (final port in invalidPorts) {
+        try {
+          final isAvailable = await _dnsService.isPortAvailable(port);
+          onLogMessage('   Port $port available: $isAvailable');
+        } catch (e) {
+          onLogMessage('   Port $port check error: $e');
+        }
+      }
+
+      onResultUpdate('错误处理测试完成');
+      onLogMessage('Error handling test completed successfully');
+
+    } catch (e) {
+      onLogMessage('Error handling test failed: $e');
+      onResultUpdate('错误处理测试失败: $e');
     }
   }
 }

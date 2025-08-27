@@ -1,16 +1,12 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
-import 'package:flutter/services.dart';
 import '../models/proxy_config.dart';
-import '../models/port_mapping.dart';
-import '../services/port_mapping_manager.dart';
 import '../utils/logger.dart';
 import '../utils/port_utils.dart';
 import '../utils/protocol_utils.dart';
 import '../utils/http1_handler.dart';
 import '../utils/http2_handler.dart';
-import '../utils/mapping_utils.dart';
 import '../services/dns_resolver.dart';
 
 // 使用从工具类导入的类型
@@ -26,8 +22,7 @@ class ProxyServer {
   final List<ServerSocket> _serverSockets = [];
   List<int> _allocatedPorts = []; // 动态分配的端口列表
   bool _isRunning = false;
-  // 端口映射管理器
-  final PortMappingManager _mappingManager = PortMappingManager();
+
   // DNS解析器
   final DnsResolver _dnsResolver;
 
@@ -235,69 +230,7 @@ class ProxyServer {
   /// 获取当前分配的端口列表
   List<int> get allocatedPorts => List.unmodifiable(_allocatedPorts);
 
-  /// 获取端口映射管理器
-  PortMappingManager get mappingManager => _mappingManager;
 
-  /// 注册端口映射
-  Future<bool> registerMapping({
-    required int localPort,
-    int? targetPort,
-    required String targetDomain,
-    String? name,
-    String? description,
-    bool isSecure = true,
-    bool includeDomainInAuthority = true,
-  }) async {
-    if (!_isRunning) {
-      Logger.warning('Proxy server is not running');
-      return false;
-    }
-
-    if (!_allocatedPorts.contains(localPort)) {
-      Logger.warning('Port $localPort is not being listened by proxy server');
-      return false;
-    }
-
-    final mapping = PortMapping(
-      localPort: localPort,
-      targetPort: targetPort,
-      targetDomain: targetDomain,
-      createdAt: DateTime.now(),
-      name: name,
-      description: description,
-      isSecure: isSecure,
-      includeDomainInAuthority: includeDomainInAuthority,
-    );
-
-    return await _mappingManager.addMapping(mapping);
-  }
-
-  /// 移除端口映射
-  Future<bool> removeMapping(int localPort) async {
-    return await _mappingManager.removeMapping(localPort);
-  }
-
-  /// 获取端口映射
-  PortMapping? getMapping(int localPort) {
-    final mapping = _mappingManager.getMapping(localPort);
-    Logger.debug('getMapping($localPort) returned: ${mapping?.toString()}');
-    if (mapping != null) {
-      Logger.debug('  - isSecure: ${mapping.isSecure}');
-      Logger.debug('  - targetDomain: ${mapping.targetDomain}');
-      Logger.debug('  - targetPort: ${mapping.targetPort}');
-    }
-    return mapping;
-  }
-
-  /// 获取所有端口映射
-  Map<int, PortMapping> getAllMappings() {
-    return _mappingManager.getAllMappings();
-  }
-
-  /// 检查端口是否有映射
-  bool hasMapping(int localPort) {
-    return _mappingManager.hasMapping(localPort);
-  }
 
   /// 注册端口监听（动态添加端口）
   ///
@@ -494,19 +427,13 @@ class _ClientHandler {
                   final httpMatch = RegExp(r'^([A-Z]+) ([^ ]+) HTTP/')
                       .firstMatch(requestString);
                   if (httpMatch != null) {
-                    // 获取端口映射信息
-                    final mapping = proxyServer.getMapping(serverPort);
-                    final includeDomainInAuthority =
-                        mapping?.includeDomainInAuthority ?? true;
-
                     final success = await Http1Handler.handleHttpRequest(
                         client,
                         server,
                         httpMatch,
                         requestString,
                         proxyServer._dnsResolver,
-                        proxyServer,
-                        includeDomainInAuthority: includeDomainInAuthority);
+                        proxyServer);
                     if (!success) {
                       throw Exception('Failed to handle HTTP request');
                     }
@@ -607,33 +534,9 @@ class _ClientHandler {
 
     while (retryCount <= maxRetries) {
       try {
-        // 使用服务器端口来获取正确的映射信息
-        final mappingResult =
-            MappingUtils.applyMapping('localhost', serverPort, proxyServer);
-
-        // 创建PortMapping对象
-        final mapping = PortMapping(
-          localPort: serverPort,
-          targetPort: mappingResult.mappedPort,
-          targetDomain: mappingResult.mappedHost,
-          createdAt: DateTime.now(),
-          isSecure: mappingResult.isSecure ?? true, // 默认使用安全连接
-        );
-
-        Logger.debug(
-            'HTTP/2 domain mapping: ${mappingResult.originalHost}:${mappingResult.originalPort} -> ${mappingResult.mappedHost}:${mappingResult.mappedPort} (isSecure: ${mappingResult.isSecure})');
-
-        // 记录DNS解析信息
-        Logger.info('HTTP/2 DNS resolution:');
-        Logger.info('  - Original domain: ${mappingResult.originalHost}');
-        Logger.info('  - Mapped domain: ${mappingResult.mappedHost}');
-        Logger.info('  - Original port: ${mappingResult.originalPort}');
-        Logger.info('  - Mapped port: ${mappingResult.mappedPort}');
-        Logger.info('  - Is secure: ${mappingResult.isSecure}');
-
         // 使用Http2Handler处理HTTP/2连接，添加超时
         final success = await Http2Handler.handleHttp2Connection(
-                client, mapping, proxyServer._dnsResolver,
+                client, serverPort, proxyServer._dnsResolver,
                 initialData: initialData, clientStream: broadcastStream)
             .timeout(
           const Duration(seconds: 30),
@@ -648,9 +551,6 @@ class _ClientHandler {
         }
 
         Logger.debug('HTTP/2 connection handled successfully');
-
-        // 添加连接成功后的详细日志
-        _logHttp2ConnectionSuccess(mapping);
 
         // 验证连接是否真正建立
         await _verifyHttp2Connection();
@@ -707,20 +607,7 @@ class _ClientHandler {
       Logger.info('  - Allocated ports: ${proxyServer._allocatedPorts}');
       Logger.info('  - Is running: ${proxyServer._isRunning}');
 
-      // 映射信息
-      final mapping = proxyServer.getMapping(serverPort);
-      if (mapping != null) {
-        Logger.info('Port mapping:');
-        Logger.info('  - Local port: ${mapping.localPort}');
-        Logger.info('  - Target port: ${mapping.targetPort}');
-        Logger.info('  - Target domain: ${mapping.targetDomain}');
-        Logger.info('  - Name: ${mapping.name}');
-        Logger.info('  - Description: ${mapping.description}');
-        Logger.info('  - Is secure: ${mapping.isSecure}');
-        Logger.info('  - Created at: ${mapping.createdAt}');
-      } else {
-        Logger.warning('Port mapping: Not found for port $serverPort');
-      }
+
 
       Logger.info('=== End HTTP/2 Request Start ===');
     } catch (e) {
@@ -728,23 +615,7 @@ class _ClientHandler {
     }
   }
 
-  /// 记录HTTP/2连接成功后的详细信息
-  void _logHttp2ConnectionSuccess(PortMapping mapping) {
-    try {
-      Logger.info('=== HTTP/2 Connection Success ===');
-      Logger.info('  - Local Port: ${mapping.localPort}');
-      Logger.info('  - Target Port: ${mapping.targetPort}');
-      Logger.info('  - Target Domain: ${mapping.targetDomain}');
-      Logger.info('  - Name: ${mapping.name ?? 'N/A'}');
-      Logger.info('  - Description: ${mapping.description ?? 'N/A'}');
-      Logger.info('  - Is Secure: ${mapping.isSecure}');
-      Logger.info(
-          '  - Created At: ${mapping.createdAt?.toIso8601String() ?? 'N/A'}');
-      Logger.info('=== End HTTP/2 Connection Success ===');
-    } catch (e) {
-      Logger.error('Failed to log HTTP/2 connection success details: $e');
-    }
-  }
+
 
   /// 验证HTTP/2连接是否真正建立
   Future<void> _verifyHttp2Connection() async {
@@ -960,20 +831,7 @@ class _ClientHandler {
       Logger.error('  - Allocated ports: ${proxyServer._allocatedPorts}');
       Logger.error('  - Is running: ${proxyServer._isRunning}');
 
-      // 映射信息
-      final mapping = proxyServer.getMapping(serverPort);
-      if (mapping != null) {
-        Logger.error('Port mapping:');
-        Logger.error('  - Local port: ${mapping.localPort}');
-        Logger.error('  - Target port: ${mapping.targetPort}');
-        Logger.error('  - Target domain: ${mapping.targetDomain}');
-        Logger.error('  - Name: ${mapping.name}');
-        Logger.error('  - Description: ${mapping.description}');
-        Logger.error('  - Is secure: ${mapping.isSecure}');
-        Logger.error('  - Created at: ${mapping.createdAt}');
-      } else {
-        Logger.error('Port mapping: Not found for port $serverPort');
-      }
+
 
       // 缓冲区信息
       Logger.error('Buffer info:');
@@ -1063,19 +921,9 @@ Connection Details:
   /// 获取请求信息
   String _getRequestInfo() {
     try {
-      final mapping = proxyServer.getMapping(serverPort);
-      if (mapping != null) {
-        return '''
-- Local Port: ${mapping.localPort}
-- Target Port: ${mapping.targetPort}
-- Target Domain: ${mapping.targetDomain}
-- Name: ${mapping.name ?? 'N/A'}
-- Description: ${mapping.description ?? 'N/A'}
-- Is Secure: ${mapping.isSecure}
-- Created At: ${mapping.createdAt?.toIso8601String() ?? 'N/A'}''';
-      } else {
-        return '- Port Mapping: Not found for port $serverPort';
-      }
+      return '''
+- Server Port: $serverPort
+- Protocol: HTTP/2''';
     } catch (e) {
       return '- Error getting request info: $e';
     }

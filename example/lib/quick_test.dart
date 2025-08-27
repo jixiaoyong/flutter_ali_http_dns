@@ -1,9 +1,9 @@
 import 'package:flutter_ali_http_dns/flutter_ali_http_dns.dart';
 
-/// 快速测试isSecure参数传递
+/// 快速测试模块 - 基本的DNS解析和代理功能测试
 class QuickTest {
-  static Future<void> testIsSecure() async {
-    print('=== 快速测试isSecure参数传递 ===');
+  static Future<void> testBasicFunctionality() async {
+    print('=== 快速测试基本功能 ===');
     
     try {
       // 1. 初始化
@@ -18,39 +18,52 @@ class QuickTest {
       );
       
       await FlutterAliHttpDns.instance.initialize(dnsConfig);
+      print('✅ DNS服务初始化成功');
+      
+      // 2. 启动代理
       await FlutterAliHttpDns.instance.startProxy();
+      print('✅ 代理服务器启动成功');
       
-      // 2. 注册不安全映射
-      print('注册不安全映射...');
-      final localPort = await FlutterAliHttpDns.instance.registerMapping(
-        targetPort: 7349,
-        targetDomain: 'api.example.com',
-        name: 'Test Insecure',
-        isSecure: false,
-      );
+      // 3. 测试DNS解析
+      print('测试DNS解析...');
+      final testDomains = ['www.google.com', 'www.github.com', 'www.baidu.com'];
       
-      if (localPort != null) {
-        print('✅ 注册成功，端口: $localPort');
-        
-        // 3. 立即验证映射
-        final mapping = await FlutterAliHttpDns.instance.getMapping(localPort);
-        if (mapping != null) {
-          print('✅ 映射信息:');
-          print('   - isSecure: ${mapping['isSecure']}');
-          print('   - targetDomain: ${mapping['targetDomain']}');
-          print('   - targetPort: ${mapping['targetPort']}');
-          
-          if (mapping['isSecure'] == false) {
-            print('🎉 isSecure参数传递成功！');
-          } else {
-            print('❌ isSecure参数传递失败！');
-          }
-        } else {
-          print('❌ 无法获取映射信息');
+      for (final domain in testDomains) {
+        try {
+          final resolvedIp = await FlutterAliHttpDns.instance.resolveDomain(domain);
+          print('   $domain -> $resolvedIp');
+        } catch (e) {
+          print('   $domain -> error: $e');
         }
-      } else {
-        print('❌ 注册失败');
       }
+      
+      // 4. 测试代理地址获取
+      print('测试代理地址获取...');
+      final proxyAddress = await FlutterAliHttpDns.instance.getProxyAddress();
+      final http2Address = await FlutterAliHttpDns.instance.getHttp2ProxyAddress();
+      final allAddresses = await FlutterAliHttpDns.instance.getAllProxyAddresses();
+      
+      print('   代理地址: $proxyAddress');
+      print('   HTTP/2地址: $http2Address');
+      print('   所有地址: ${allAddresses.join(', ')}');
+      
+      // 5. 测试代理配置
+      print('测试代理配置...');
+      final proxyConfig = await FlutterAliHttpDns.instance.getProxyConfigString();
+      final dioConfig = await FlutterAliHttpDns.instance.getDioProxyConfig();
+      
+      print('   代理配置字符串: $proxyConfig');
+      print('   Dio配置: $dioConfig');
+      
+      // 6. 测试端口管理
+      print('测试端口管理...');
+      final actualPorts = await FlutterAliHttpDns.instance.getActualPorts();
+      final mainPort = await FlutterAliHttpDns.instance.getMainPort();
+      
+      print('   实际端口: ${actualPorts.join(', ')}');
+      print('   主要端口: $mainPort');
+      
+      print('🎉 快速测试完成！');
       
     } catch (e) {
       print('❌ 测试失败: $e');

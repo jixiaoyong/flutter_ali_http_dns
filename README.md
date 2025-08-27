@@ -84,28 +84,23 @@ if (proxyConfig != null) {
 final response = await dio.get('https://www.example.com');
 ```
 
-#### Nakama场景（使用动态端口映射）
+#### 基本代理场景
 
 ```dart
-// 注册端口映射（自动分配端口）
-final localPort = await dnsService.registerMapping(
-  targetPort: 7350,                    // 目标端口
-  targetDomain: 'api.game-service.com', // 目标域名
-  name: 'Nakama HTTP',                 // 映射名称
-  description: 'Nakama HTTP service',  // 描述
-);
+// 启动代理服务器
+await dnsService.startProxy();
 
-if (localPort != null) {
-  print('Nakama HTTP 服务监听在端口: $localPort');
-  
-  // 使用映射的端口
-  final client = HttpClient();
-  await dnsService.configureHttpClient(client);
-  final request = await client.getUrl(Uri.parse('http://localhost:$localPort'));
-  
-  // 移除映射
-  await dnsService.removeMapping(localPort);
-}
+// 获取代理地址
+final proxyAddress = await dnsService.getProxyAddress();
+print('代理服务器地址: $proxyAddress');
+
+// 配置HttpClient使用代理
+final client = HttpClient();
+await dnsService.configureHttpClient(client);
+
+// 发起请求
+final request = await client.getUrl(Uri.parse('https://www.example.com'));
+final response = await request.close();
 ```
 
 ## API 参考
@@ -147,18 +142,13 @@ Future<bool> checkProxyStatus()
 Future<int> getMainPort()
 ```
 
-#### 端口映射（自动分配）
+#### 代理管理
 ```dart
-Future<int?> registerMapping({
-  int? targetPort,           // 目标端口（可选）
-  required String targetDomain, // 目标域名
-  String? name,              // 映射名称（可选）
-  String? description,       // 描述信息（可选）
-})
-
-Future<bool> removeMapping(int localPort)
-Future<Map<String, dynamic>?> getMapping(int localPort)
-Future<Map<String, Map<String, dynamic>>> getAllMappings()
+Future<String?> getProxyAddress()
+Future<String?> getHttp2ProxyAddress()
+Future<List<String>> getAllProxyAddresses()
+Future<String?> getProxyConfigString()
+Future<Map<String, dynamic>?> getDioProxyConfig()
 ```
 
 #### 域名解析
@@ -168,12 +158,15 @@ Future<void> configureHttpClient(HttpClient client)
 Future<Map<String, dynamic>?> getDioProxyConfig()
 ```
 
-#### 端口管理（内部使用）
+#### 端口管理
 ```dart
+Future<List<int>> getActualPorts()        // 获取实际使用的端口
+Future<int?> getMainPort()                // 获取主要端口
 Future<List<int>> getAvailablePorts()     // 获取当前监听的端口
 Future<bool> registerPort(int port)       // 注册端口监听
 Future<bool> deregisterPort(int port)     // 取消注册端口监听
 Future<bool> isPortListening(int port)    // 检查端口是否正在监听
+Future<bool> isPortAvailable(int port)    // 检查端口是否可用
 ```
 
 #### 工具方法
@@ -187,7 +180,7 @@ Future<String> getProxyConfigString()
 ## 智能代理工作原理
 
 1. **默认代理启动**: SDK启动时创建一个默认代理服务器，监听一个可用端口
-2. **自动端口分配**: 当用户调用`registerMapping`时，SDK自动查找可用端口
+2. **自动端口分配**: SDK自动查找可用端口并启动代理服务
 3. **动态端口管理**: 端口分配、监听、清理都由SDK内部管理
 4. **智能冲突处理**: 自动处理端口冲突，确保服务稳定运行
 
@@ -203,9 +196,9 @@ Future<String> getProxyConfigString()
 ### 代理模式
 
 当前SDK采用**单端口默认模式**：
-- 启动时监听一个默认端口（用于Dio等普通场景）
-- 通过`registerMapping`动态添加额外端口（用于Nakama等特殊场景）
-- 所有端口共享相同的代理逻辑和配置
+- 启动时监听一个默认端口（用于HttpClient、Dio等场景）
+- 支持HTTP/2协议
+- 所有请求共享相同的代理逻辑和配置
 
 ## 使用场景
 
@@ -220,42 +213,31 @@ final proxyConfig = await dnsService.getDioProxyConfig();
 // ... 配置代理
 ```
 
-### 2. Nakama游戏服务器
+### 2. HTTP/2代理
 ```dart
-// 为Nakama服务注册映射
-final httpPort = await dnsService.registerMapping(
-  targetPort: 7350,
-  targetDomain: 'api.game-service.com',
-  name: 'Nakama HTTP',
-);
+// 启动代理服务器
+await dnsService.startProxy();
 
-final grpcPort = await dnsService.registerMapping(
-  targetPort: 7349,
-  targetDomain: 'api.game-service.com',
-  name: 'Nakama gRPC',
-);
+// 获取HTTP/2代理地址
+final http2Address = await dnsService.getHttp2ProxyAddress();
+print('HTTP/2代理地址: $http2Address');
 
-// 使用映射的端口
-// ... 配置Nakama客户端
+// 使用HTTP/2代理
+// ... 配置HTTP/2客户端
 ```
 
-### 3. 多服务代理
+### 3. 多端口代理
 ```dart
-// 批量注册多个服务
-final services = [
-  {'name': 'API', 'port': 7350, 'domain': 'api.service.com'},
-  {'name': 'Chat', 'port': 7349, 'domain': 'chat.service.com'},
-  {'name': 'Auth', 'port': null, 'domain': 'auth.service.com'},
-];
+// 启动代理服务器
+await dnsService.startProxy();
 
-for (final service in services) {
-  final localPort = await dnsService.registerMapping(
-    targetPort: service['port'] as int?,
-    targetDomain: service['domain'] as String,
-    name: service['name'] as String,
-  );
-  print('${service['name']} 服务监听在端口: $localPort');
-}
+// 获取所有代理地址
+final allAddresses = await dnsService.getAllProxyAddresses();
+print('所有代理地址: ${allAddresses.join(', ')}');
+
+// 获取主要端口
+final mainPort = await dnsService.getMainPort();
+print('主要端口: $mainPort');
 ```
 
 ## 示例项目
@@ -263,9 +245,8 @@ for (final service in services) {
 查看 `example/` 目录获取完整的使用示例：
 
 - **基础测试** (`basic_tests.dart`): 域名解析、HttpClient、Dio测试
-- **Nakama测试** (`nakama_tests.dart`): 游戏服务器代理测试
-- **端口管理测试** (`port_management_tests.dart`): 端口冲突、动态映射测试
-- **高级功能测试** (`advanced_tests.dart`): 批量操作、配置选项、性能测试
+- **HTTP/2测试** (`http2_tests.dart`): HTTP/2协议支持测试
+- **高级功能测试** (`advanced_tests.dart`): 性能测试、错误处理测试
 
 ## 模块化架构说明
 
@@ -276,8 +257,8 @@ example/lib/modules/
 ├── modules.dart              # 统一导出文件
 ├── service_manager.dart      # 服务管理器
 ├── basic_tests.dart          # 基础功能测试
-├── nakama_tests.dart         # Nakama场景测试
-├── port_management_tests.dart # 端口管理测试
+├── http2_tests.dart          # HTTP/2协议测试
+├── http2_advanced_tests.dart # HTTP/2高级测试
 ├── advanced_tests.dart       # 高级功能测试
 └── ui_components.dart        # UI组件
 ```
@@ -286,9 +267,9 @@ example/lib/modules/
 
 - **ServiceManager**: 管理DNS和代理服务的初始化、启动、停止
 - **BasicTests**: 处理域名解析、HttpClient、Dio等基础功能测试
-- **NakamaTests**: 专门处理Nakama游戏服务器的代理测试
-- **PortManagementTests**: 处理端口冲突、动态映射、端口管理等测试
-- **AdvancedTests**: 处理高级功能、配置选项、性能测试等
+- **Http2Tests**: 处理HTTP/2协议支持测试
+- **Http2AdvancedTests**: 处理HTTP/2高级功能测试
+- **AdvancedTests**: 处理性能测试、错误处理等高级功能
 - **UIComponents**: 提供可复用的UI组件
 
 ### 使用示例
@@ -298,8 +279,6 @@ example/lib/modules/
 class _MyHomePageState extends State<MyHomePage> {
   late final ServiceManager _serviceManager;
   late final BasicTests _basicTests;
-  late final NakamaTests _nakamaTests;
-  late final PortManagementTests _portManagementTests;
   late final AdvancedTests _advancedTests;
 
   @override
@@ -317,16 +296,16 @@ class _MyHomePageState extends State<MyHomePage> {
 ## 常见问题
 
 ### Q: 如何获取代理端口？
-A: 使用`getMainPort()`获取默认代理端口，或使用`registerMapping()`自动分配端口。
+A: 使用`getMainPort()`获取默认代理端口，或使用`getProxyAddress()`获取代理地址。
 
 ### Q: 如何处理端口冲突？
 A: SDK会自动处理端口冲突，如果指定端口被占用，会自动寻找下一个可用端口。
 
-### Q: 如何批量管理多个服务？
-A: 使用循环调用`registerMapping()`方法，SDK会自动为每个服务分配可用端口。
+### Q: 如何获取HTTP/2代理地址？
+A: 使用`getHttp2ProxyAddress()`获取HTTP/2代理地址。
 
 ### Q: 代理服务器会自动清理端口吗？
-A: 是的，当调用`stopProxy()`时，所有动态注册的端口都会被自动清理。
+A: 是的，当调用`stopProxy()`时，所有端口都会被自动清理。
 
 ### Q: 如何检查端口是否可用？
 A: 使用`isPortAvailable(int port)`方法检查端口是否可用。

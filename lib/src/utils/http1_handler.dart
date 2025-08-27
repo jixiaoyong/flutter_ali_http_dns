@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:convert';
 import '../services/dns_resolver.dart';
 import '../utils/logger.dart';
-import '../utils/mapping_utils.dart';
+
 
 /// HTTP/1.1处理工具类
 /// 提供HTTP/1.1协议处理的通用方法
@@ -43,19 +43,13 @@ class Http1Handler {
       Logger.info('  - Original port: $port');
       Logger.info('  - Full URL: $url');
 
-      // 应用域名和端口映射
-      final mappingResult = MappingUtils.applyMapping(host, port, proxyServer);
-      final mappedHost = mappingResult.mappedHost;
-      final mappedPort = mappingResult.mappedPort;
+      // 直接使用原始域名和端口，不进行映射
+      final mappedHost = host;
+      final mappedPort = port;
 
-      Logger.info('Domain mapping:');
-      Logger.info('  - Original: $host:$port');
-      Logger.info('  - Mapped: $mappedHost:$mappedPort');
-
-      // 验证映射后的域名
-      if (mappedHost.isEmpty || mappedHost == '*') {
-        throw Exception('Invalid mapped host: $mappedHost');
-      }
+      Logger.info('Direct forwarding:');
+      Logger.info('  - Host: $host');
+      Logger.info('  - Port: $port');
 
       // DNS 解析
       Logger.info('DNS resolution:');
@@ -122,19 +116,13 @@ class Http1Handler {
       Logger.info('=== HTTPS CONNECT Request Processing ===');
       Logger.info('Original CONNECT request: $host:$port');
 
-      // 应用域名和端口映射
-      final mappingResult = MappingUtils.applyMapping(host, port, proxyServer);
-      final mappedHost = mappingResult.mappedHost;
-      final mappedPort = mappingResult.mappedPort;
+      // 直接使用原始域名和端口，不进行映射
+      final mappedHost = host;
+      final mappedPort = port;
 
-      Logger.info('Domain mapping:');
-      Logger.info('  - Original: $host:$port');
-      Logger.info('  - Mapped: $mappedHost:$mappedPort');
-
-      // 验证映射后的域名
-      if (mappedHost.isEmpty || mappedHost == '*') {
-        throw Exception('Invalid mapped host: $mappedHost');
-      }
+      Logger.info('Direct forwarding:');
+      Logger.info('  - Host: $host');
+      Logger.info('  - Port: $port');
 
       // DNS 解析
       Logger.info('DNS resolution:');
@@ -221,18 +209,12 @@ class Http1Handler {
 
       Logger.debug('WebSocket request: $host:$port');
 
-      // 应用域名和端口映射
-      final mappingResult = MappingUtils.applyMapping(host, port, proxyServer);
-      final mappedHost = mappingResult.mappedHost;
-      final mappedPort = mappingResult.mappedPort;
-
-      // 验证映射后的域名
-      if (mappedHost.isEmpty || mappedHost == '*') {
-        throw Exception('Invalid mapped host: $mappedHost');
-      }
+      // 直接使用原始域名和端口，不进行映射
+      final mappedHost = host;
+      final mappedPort = port;
 
       Logger.debug(
-          'WebSocket domain mapping: $host:$port -> $mappedHost:$mappedPort');
+          'WebSocket direct forwarding: $host:$port');
 
       // DNS 解析
       final ip = await dnsResolver.resolve(mappedHost);

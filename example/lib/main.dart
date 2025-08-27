@@ -36,15 +36,12 @@ class _MyHomePageState extends State<MyHomePage> {
   
   // 测试模块
   late BasicTests _basicTests;
-  late NakamaTests _nakamaTests;
-  late PortManagementTests _portManagementTests;
   late AdvancedTests _advancedTests;
 
   // 状态变量
   String _resolutionResult = '点击按钮开始测试';
   String _httpResult = '点击按钮开始测试';
   String _dioResult = '点击按钮开始测试';
-  String _nakamaResult = '点击按钮开始测试';
   String _advancedResult = '点击按钮开始测试';
   String _logMessages = '';
 
@@ -71,19 +68,6 @@ class _MyHomePageState extends State<MyHomePage> {
       isProxyRunning: _serviceManager.isProxyRunning,
     );
 
-    _nakamaTests = NakamaTests(
-      dnsService: _serviceManager.dnsService,
-      onLogMessage: _addLogMessage,
-      onResultUpdate: (result) => setState(() => _nakamaResult = result),
-      isProxyRunning: _serviceManager.isProxyRunning,
-    );
-
-    _portManagementTests = PortManagementTests(
-      dnsService: _serviceManager.dnsService,
-      onLogMessage: _addLogMessage,
-      isInitialized: _serviceManager.isInitialized,
-    );
-
     _advancedTests = AdvancedTests(
       dnsService: _serviceManager.dnsService,
       onLogMessage: _addLogMessage,
@@ -102,19 +86,6 @@ class _MyHomePageState extends State<MyHomePage> {
       isProxyRunning: _serviceManager.isProxyRunning,
     );
 
-    _nakamaTests = NakamaTests(
-      dnsService: _serviceManager.dnsService,
-      onLogMessage: _addLogMessage,
-      onResultUpdate: (result) => setState(() => _nakamaResult = result),
-      isProxyRunning: _serviceManager.isProxyRunning,
-    );
-
-    _portManagementTests = PortManagementTests(
-      dnsService: _serviceManager.dnsService,
-      onLogMessage: _addLogMessage,
-      isInitialized: _serviceManager.isInitialized,
-    );
-
     _advancedTests = AdvancedTests(
       dnsService: _serviceManager.dnsService,
       onLogMessage: _addLogMessage,
@@ -127,7 +98,7 @@ class _MyHomePageState extends State<MyHomePage> {
   /// 添加日志消息
   void _addLogMessage(String message) {
     setState(() {
-      _logMessages += '$message\n';
+      _logMessages = '${DateTime.now().toString().substring(11, 19)} $message\n$_logMessages';
     });
   }
 
@@ -144,24 +115,17 @@ class _MyHomePageState extends State<MyHomePage> {
     _updateTestModules();
   }
 
-  /// 清空日志
-  void _clearLogs() {
-    setState(() {
-      _logMessages = '';
-    });
-  }
-
-  /// 初始化DNS服务
+  /// 初始化DNS
   Future<void> _initializeDns() async {
     await _serviceManager.initializeDns();
   }
 
-  /// 启动代理服务器
+  /// 启动代理
   Future<void> _startProxy() async {
     await _serviceManager.startProxy();
   }
 
-  /// 停止代理服务器
+  /// 停止代理
   Future<void> _stopProxy() async {
     await _serviceManager.stopProxy();
   }
@@ -183,39 +147,26 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() => _dioResult = _resolutionResult);
   }
 
-  /// 测试Nakama代理
-  Future<void> _testNakamaProxy() async {
-    await _nakamaTests.testNakamaProxy();
-  }
-
-  /// 测试端口冲突
-  Future<void> _testPortConflict() async {
-    await _portManagementTests.testPortConflict();
-  }
-
-  /// 测试动态端口映射
-  Future<void> _testDynamicMapping() async {
-    await _portManagementTests.testDynamicMapping();
-  }
-
-  /// 测试端口管理
-  Future<void> _testPortManagement() async {
-    await _portManagementTests.testPortManagement();
-  }
-
-  /// 测试跨应用隔离
-  Future<void> _testCrossAppIsolation() async {
-    await _portManagementTests.testCrossAppIsolation();
-  }
-
   /// 测试高级功能
   Future<void> _testAdvancedFeatures() async {
     await _advancedTests.testAdvancedFeatures();
   }
 
-  /// 测试配置选项
-  Future<void> _testConfigurationOptions() async {
-    await _advancedTests.testConfigurationOptions();
+  /// 测试性能
+  Future<void> _testPerformance() async {
+    await _advancedTests.testPerformance();
+  }
+
+  /// 测试错误处理
+  Future<void> _testErrorHandling() async {
+    await _advancedTests.testErrorHandling();
+  }
+
+  /// 清除日志
+  void _clearLogs() {
+    setState(() {
+      _logMessages = '';
+    });
   }
 
   @override
@@ -256,20 +207,16 @@ class _MyHomePageState extends State<MyHomePage> {
               onTestDomainResolution: _testDomainResolution,
               onTestHttpClient: _testHttpClient,
               onTestDio: _testDio,
-              onTestNakamaProxy: _testNakamaProxy,
             ),
             const SizedBox(height: 16),
 
-            // 端口管理测试
-            UIComponents.buildPortManagementTestCard(
+            // 高级功能测试
+            UIComponents.buildAdvancedTestCard(
               context: context,
               isInitialized: _serviceManager.isInitialized,
-              onTestPortConflict: _testPortConflict,
-              onTestDynamicMapping: _testDynamicMapping,
-              onTestPortManagement: _testPortManagement,
-              onTestCrossAppIsolation: _testCrossAppIsolation,
               onTestAdvancedFeatures: _testAdvancedFeatures,
-              onTestConfigurationOptions: _testConfigurationOptions,
+              onTestPerformance: _testPerformance,
+              onTestErrorHandling: _testErrorHandling,
             ),
             const SizedBox(height: 16),
 
@@ -284,7 +231,7 @@ class _MyHomePageState extends State<MyHomePage> {
             // HttpClient测试结果
             UIComponents.buildResultCard(
               context: context,
-              title: 'HttpClient 测试结果 (Dio 场景)',
+              title: 'HttpClient 测试结果',
               result: _httpResult,
             ),
             const SizedBox(height: 16),
@@ -292,16 +239,8 @@ class _MyHomePageState extends State<MyHomePage> {
             // Dio测试结果
             UIComponents.buildResultCard(
               context: context,
-              title: 'Dio 测试结果 (Dio 场景)',
+              title: 'Dio 测试结果',
               result: _dioResult,
-            ),
-            const SizedBox(height: 16),
-
-            // Nakama代理测试结果
-            UIComponents.buildResultCard(
-              context: context,
-              title: 'Nakama 代理测试结果',
-              result: _nakamaResult,
             ),
             const SizedBox(height: 16),
 

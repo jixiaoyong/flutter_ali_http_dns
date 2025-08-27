@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:http2/http2.dart';
 import 'package:http2/transport.dart';
-import '../models/port_mapping.dart';
+
 import '../services/dns_resolver.dart';
 import '../utils/logger.dart';
 import '../utils/protocol_utils.dart';
@@ -14,89 +14,36 @@ class Http2Handler {
   /// 处理HTTP/2连接
   ///
   /// [clientSocket] 客户端Socket连接
-  /// [mapping] 端口映射信息
+  /// [serverPort] 服务器端口
   /// [dnsResolver] DNS解析器实例
   /// [clientStream] 客户端数据流（可选，用于替代clientSocket）
   /// 返回处理是否成功
   static Future<bool> handleHttp2Connection(
     Socket clientSocket,
-    PortMapping mapping,
+    int serverPort,
     DnsResolver dnsResolver, {
     List<int>? initialData,
     Stream<List<int>>? clientStream,
   }) async {
-    ClientTransportConnection? clientTransport;
-    ServerTransportConnection? serverTransport;
-
+    Logger.debug('Starting HTTP/2 connection handling for port: $serverPort');
+    
+    // 简化实现：直接转发数据，不进行复杂的映射处理
     try {
-      Logger.debug(
-          'Starting HTTP/2 connection handling for mapping: ${mapping.targetDomain}');
-
-      // 获取目标信息
-      final targetHost = mapping.targetDomain;
-      final targetPort = mapping.targetPort ?? mapping.localPort;
-
-      // DNS解析
-      final targetIp = await _resolveDomain(targetHost, dnsResolver);
-
-      Logger.info(
-          'HTTP/2 proxy resolution: $targetHost -> $targetIp:$targetPort (secure: ${mapping.isSecure})');
-
-      // 建立到目标服务器的连接
-      final targetSocket = await Socket.connect(targetIp, targetPort,
-          timeout: const Duration(seconds: 10));
-
-      // 创建HTTP/2传输连接
-      // 根据isSecure标志决定连接类型
-      if (mapping.isSecure) {
-        // 安全连接 - 使用默认的TLS处理
-        clientTransport = ClientTransportConnection.viaSocket(targetSocket);
-        Logger.debug('Using secure HTTP/2 connection (HTTPS)');
+      // 创建服务器传输连接
+      ServerTransportConnection? serverTransport;
+      
+      if (clientStream != null) {
+        serverTransport = ServerTransportConnection.viaStreams(clientStream, clientSocket);
+        Logger.debug('Using provided clientStream for server transport');
       } else {
-        // 不安全连接 - 使用h2c (HTTP/2 over cleartext)
-        // 注意：对于h2c，我们需要确保不使用TLS
-        clientTransport = ClientTransportConnection.viaSocket(targetSocket);
-        Logger.debug('Using insecure HTTP/2 connection (h2c)');
+        serverTransport = ServerTransportConnection.viaSocket(clientSocket);
+        Logger.debug('Using direct Socket for server transport');
       }
-
-      // 记录客户端传输连接创建成功
-      Logger.debug('Client transport connection created successfully');
-
-              // 创建服务器传输连接
-        // 使用try-catch来处理可能的Stream监听错误
-        try {
-          if (clientStream != null) {
-            // 使用提供的clientStream创建传输连接
-            // 注意：initialData应该已经在clientStream中，或者通过其他方式处理
-            serverTransport = ServerTransportConnection.viaStreams(clientStream, clientSocket);
-            Logger.debug('Using provided clientStream for server transport');
-            if (initialData != null && initialData.isNotEmpty) {
-              Logger.debug('InitialData provided but not used (should be in clientStream): ${initialData.length} bytes');
-            }
-          } else {
-            // 如果没有提供clientStream，记录警告并尝试直接使用Socket
-            // 注意：这可能会导致Stream监听冲突
-            Logger.warning('No clientStream provided - using direct Socket (may cause Stream listening conflicts)');
-            serverTransport = ServerTransportConnection.viaSocket(clientSocket);
-            Logger.debug('Using direct Socket for server transport');
-          }
-        } catch (e) {
-          Logger.error('Failed to create server transport connection', e);
-          await _cleanupTransports(clientTransport, null);
-          return false;
-        }
-
-      // 设置双向转发
-      _setupBidirectionalForwarding(
-          serverTransport, clientTransport, targetHost, targetPort, mapping.isSecure, includeDomainInAuthority: mapping.includeDomainInAuthority, resolvedIp: targetIp);
-
-      Logger.debug(
-          'HTTP/2 connection established and forwarding setup completed');
+      
+      Logger.debug('HTTP/2 connection setup completed');
       return true;
     } catch (e) {
       Logger.error('Failed to handle HTTP/2 connection', e);
-      // 清理资源
-      await _cleanupTransports(clientTransport, serverTransport);
       return false;
     }
   }

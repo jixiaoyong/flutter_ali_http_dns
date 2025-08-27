@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter_ali_http_dns/flutter_ali_http_dns.dart';
-import '../nakama_config.dart';
 
 /// HTTP/2协议测试模块 - 验证代理服务器对HTTP/2的支持
 class Http2Tests {
@@ -24,51 +23,28 @@ class Http2Tests {
       return;
     }
 
-    // 验证Nakama配置
-    if (!NakamaConfig.isValid()) {
-      onLogMessage('错误: Nakama配置无效，请检查nakama_config.dart文件');
-      onResultUpdate('配置错误: 请设置正确的Nakama服务器域名');
-      return;
-    }
-
     try {
       onResultUpdate('正在测试 HTTP/2 协议支持...');
-      onLogMessage('使用Nakama服务器: ${NakamaConfig.nakamaBaseUrl}');
+      onLogMessage('开始HTTP/2协议测试');
 
-      // 注册gRPC端口映射（HTTP/2）- 使用不安全连接
-      final grpcPort = await _dnsService.registerMapping(
-        targetPort: NakamaConfig.nakamaPortGrpc,
-        targetDomain: NakamaConfig.nakamaBaseUrl,
-        name: 'nakama-grpc-http2',
-        description: 'Nakama gRPC HTTP/2 service mapping',
-        isSecure: false, // gRPC服务只支持HTTP
-      );
-
-      if (grpcPort == null) {
-        onLogMessage('gRPC端口映射注册失败');
-        onResultUpdate('gRPC端口映射注册失败');
+      // 获取代理地址
+      final proxyAddress = await _dnsService.getProxyAddress();
+      if (proxyAddress == null) {
+        onLogMessage('无法获取代理地址');
+        onResultUpdate('无法获取代理地址');
         return;
       }
 
-      onLogMessage('gRPC端口映射注册成功: localhost:$grpcPort -> ${NakamaConfig.nakamaBaseUrl}:${NakamaConfig.nakamaPortGrpc}');
+      onLogMessage('代理地址: $proxyAddress');
 
       // 测试HTTP/2连接
-      final testResults = await _testHttp2Connection(grpcPort);
-
-      // 获取映射信息
-      final allMappings = await _dnsService.getAllMappings();
+      final testResults = await _testHttp2Connection(proxyAddress);
 
       onResultUpdate(
         'HTTP/2 协议测试完成\n'
-        '服务器: ${NakamaConfig.nakamaBaseUrl}\n'
-        'gRPC端口: $grpcPort\n'
-        '测试结果: $testResults\n'
-        '端口映射详情: ${allMappings.length} 个映射'
+        '代理地址: $proxyAddress\n'
+        '测试结果: $testResults'
       );
-
-      // 清理映射
-      final success = await _dnsService.removeMapping(grpcPort);
-      onLogMessage('Remove gRPC mapping (port $grpcPort): ${success ? 'Success' : 'Failed'}');
 
     } catch (e) {
       onLogMessage('HTTP/2测试失败: $e');
@@ -77,12 +53,23 @@ class Http2Tests {
   }
 
   /// 测试HTTP/2连接
-  Future<String> _testHttp2Connection(int localPort) async {
+  Future<String> _testHttp2Connection(String proxyAddress) async {
     try {
-      onLogMessage('正在测试HTTP/2连接 (localhost:$localPort)');
+      onLogMessage('正在测试HTTP/2连接 ($proxyAddress)');
+
+      final parts = proxyAddress.split(':');
+      if (parts.length != 2) {
+        return '代理地址格式错误: $proxyAddress';
+      }
+
+      final host = parts[0];
+      final port = int.tryParse(parts[1]);
+      if (port == null) {
+        return '端口号格式错误: ${parts[1]}';
+      }
 
       // 创建Socket连接
-      final socket = await Socket.connect('localhost', localPort);
+      final socket = await Socket.connect(host, port);
       onLogMessage('Socket连接建立成功');
 
       // 发送HTTP/2连接前言
@@ -93,7 +80,7 @@ class Http2Tests {
       // 等待响应
       await Future.delayed(const Duration(seconds: 2));
 
-      // 检查连接状态 - 使用try-catch来检测连接是否有效
+      // 检查连接状态
       try {
         // 尝试发送一个字节来测试连接
         socket.add([0]);
@@ -121,35 +108,24 @@ class Http2Tests {
     try {
       onResultUpdate('正在测试 WebSocket 协议支持...');
 
-      // 注册WebSocket端口映射
-      final wsPort = await _dnsService.registerMapping(
-        targetPort: NakamaConfig.nakamaPortHttp, // WebSocket通常使用HTTP端口
-        targetDomain: NakamaConfig.nakamaBaseUrl,
-        name: 'nakama-websocket',
-        description: 'Nakama WebSocket service mapping',
-        isSecure: true, // WebSocket可以使用安全连接
-      );
-
-      if (wsPort == null) {
-        onLogMessage('WebSocket端口映射注册失败');
-        onResultUpdate('WebSocket端口映射注册失败');
+      // 获取代理地址
+      final proxyAddress = await _dnsService.getProxyAddress();
+      if (proxyAddress == null) {
+        onLogMessage('无法获取代理地址');
+        onResultUpdate('无法获取代理地址');
         return;
       }
 
-      onLogMessage('WebSocket端口映射注册成功: localhost:$wsPort');
+      onLogMessage('代理地址: $proxyAddress');
 
-      // 测试WebSocket握手
-      final testResults = await _testWebSocketHandshake(wsPort);
+      // 测试WebSocket连接
+      final testResults = await _testWebSocketConnection(proxyAddress);
 
       onResultUpdate(
         'WebSocket 协议测试完成\n'
-        '端口: $wsPort\n'
+        '代理地址: $proxyAddress\n'
         '测试结果: $testResults'
       );
-
-      // 清理映射
-      final success = await _dnsService.removeMapping(wsPort);
-      onLogMessage('Remove WebSocket mapping (port $wsPort): ${success ? 'Success' : 'Failed'}');
 
     } catch (e) {
       onLogMessage('WebSocket测试失败: $e');
@@ -157,46 +133,56 @@ class Http2Tests {
     }
   }
 
-  /// 测试WebSocket握手
-  Future<String> _testWebSocketHandshake(int localPort) async {
+  /// 测试WebSocket连接
+  Future<String> _testWebSocketConnection(String proxyAddress) async {
     try {
-      onLogMessage('正在测试WebSocket握手 (localhost:$localPort)');
+      onLogMessage('正在测试WebSocket连接 ($proxyAddress)');
+
+      final parts = proxyAddress.split(':');
+      if (parts.length != 2) {
+        return '代理地址格式错误: $proxyAddress';
+      }
+
+      final host = parts[0];
+      final port = int.tryParse(parts[1]);
+      if (port == null) {
+        return '端口号格式错误: ${parts[1]}';
+      }
 
       // 创建Socket连接
-      final socket = await Socket.connect('localhost', localPort);
-      onLogMessage('Socket连接建立成功');
+      final socket = await Socket.connect(host, port);
+      onLogMessage('WebSocket连接建立成功');
 
       // 发送WebSocket握手请求
-      final wsHandshake = 
-        'GET /ws HTTP/1.1\r\n'
-        'Host: localhost:$localPort\r\n'
-        'Upgrade: websocket\r\n'
-        'Connection: Upgrade\r\n'
-        'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n'
-        'Sec-WebSocket-Version: 13\r\n'
-        '\r\n';
-
-      socket.add(utf8.encode(wsHandshake));
+      final wsRequest = '''
+GET / HTTP/1.1\r
+Host: $host:$port\r
+Upgrade: websocket\r
+Connection: Upgrade\r
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r
+Sec-WebSocket-Version: 13\r
+\r
+''';
+      socket.add(utf8.encode(wsRequest));
       onLogMessage('WebSocket握手请求已发送');
 
       // 等待响应
       await Future.delayed(const Duration(seconds: 2));
 
-      // 检查连接状态 - 使用try-catch来检测连接是否有效
+      // 检查连接状态
       try {
-        // 尝试发送一个字节来测试连接
         socket.add([0]);
-        onLogMessage('WebSocket握手测试成功');
+        onLogMessage('WebSocket连接测试成功');
         socket.destroy();
-        return 'WebSocket握手成功';
+        return 'WebSocket连接建立成功';
       } catch (e) {
         socket.destroy();
         return '连接已关闭: $e';
       }
 
     } catch (e) {
-      onLogMessage('WebSocket握手测试失败: $e');
-      return 'WebSocket握手失败: $e';
+      onLogMessage('WebSocket连接测试失败: $e');
+      return 'WebSocket连接失败: $e';
     }
   }
 }
