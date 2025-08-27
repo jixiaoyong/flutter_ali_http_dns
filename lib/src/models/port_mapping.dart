@@ -27,6 +27,14 @@ class PortMapping with _$PortMapping {
     
     /// 是否激活
     @Default(true) bool isActive,
+    
+    /// 是否为安全连接 (HTTPS/TLS)
+    @Default(true) bool isSecure,
+    
+    /// 是否在:authority头部中包含域名信息
+    /// true: 包含域名信息 (api.example.com:443)
+    /// false: 只使用IP地址 (198.1.1.1:443)
+    @Default(true) bool includeDomainInAuthority,
   }) = _PortMapping;
 
   factory PortMapping.fromJson(Map<String, dynamic> json) =>

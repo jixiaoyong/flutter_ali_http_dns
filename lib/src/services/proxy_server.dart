@@ -1,208 +1,61 @@
 import 'dart:io';
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/services.dart';
 import '../models/proxy_config.dart';
 import '../models/port_mapping.dart';
 import '../services/port_mapping_manager.dart';
 import '../utils/logger.dart';
+import '../utils/port_utils.dart';
+import '../utils/protocol_utils.dart';
+import '../utils/http1_handler.dart';
+import '../utils/http2_handler.dart';
+import '../utils/mapping_utils.dart';
+import '../services/dns_resolver.dart';
 
-/// 端口占用信息
-class PortInfo {
-  final int port;
-  final int? pid;
-  final String? processName;
-  final String? command;
-  final bool isOwnProcess;
-
-  PortInfo({
-    required this.port,
-    this.pid,
-    this.processName,
-    this.command,
-    required this.isOwnProcess,
-  });
-
-  @override
-  String toString() {
-    if (pid == null) {
-      return 'Port $port is not in use';
-    }
-    return 'Port $port is used by PID $pid ($processName) - ${isOwnProcess ? "Own process" : "Other process"}';
-  }
-}
+// 使用从工具类导入的类型
 
 /// 支持 HTTPDNS 的代理服务器
 /// - 兼容 Dio（原域名+原端口）
 /// - 兼容 Nakama（127.0.0.1/localhost + 动态域名映射）
 /// - 支持动态端口分配和映射管理
 /// - 默认监听单个端口，支持动态添加端口
+/// - 支持HTTP/2协议（使用http2库）
 class ProxyServer {
   ProxyConfig config;
-  List<ServerSocket> _serverSockets = [];
+  final List<ServerSocket> _serverSockets = [];
   List<int> _allocatedPorts = []; // 动态分配的端口列表
   bool _isRunning = false;
-  static int? _currentPid;
-
   // 端口映射管理器
   final PortMappingManager _mappingManager = PortMappingManager();
+  // DNS解析器
+  final DnsResolver _dnsResolver;
 
   // 单例模式：确保同一个app中只有一个实例
   static ProxyServer? _instance;
   static final Map<int, ProxyServer> _instancesByPort = {};
 
-  static const platform = MethodChannel('flutter_ali_http_dns');
-
-  ProxyServer({required this.config}) {
-    // 记录当前进程ID
-    _currentPid ??= getCurrentPid();
-  }
-
-  /// 获取当前进程ID
-  static int getCurrentPid() {
-    try {
-      // 在 Unix 系统上使用 getpid()
-      if (Platform.isMacOS || Platform.isLinux) {
-        final result = Process.runSync('sh', ['-c', 'echo \$\$']);
-        return int.tryParse(result.stdout.toString().trim()) ?? 0;
-      }
-      // 在 Windows 上使用 %PID%
-      else if (Platform.isWindows) {
-        final result = Process.runSync('cmd', ['/c', 'echo %PID%']);
-        return int.tryParse(result.stdout.toString().trim()) ?? 0;
-      }
-      return 0;
-    } catch (e) {
-      Logger.warning('Failed to get current PID: $e');
-      return 0;
-    }
-  }
-
-  /// 检查端口是否可用
-  static Future<bool> isPortAvailable(int port) async {
-    try {
-      final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
-      await socket.close();
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  /// 获取端口占用详细信息
-  static Future<PortInfo> getPortInfo(int port) async {
-    try {
-      // 首先尝试绑定端口来检查是否可用
-      final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
-      await socket.close();
-      return PortInfo(port: port, isOwnProcess: false);
-    } catch (e) {
-      // 端口被占用，尝试获取占用信息
-      return await _getPortUsageInfo(port);
-    }
-  }
-
-  /// 获取端口使用信息
-  static Future<PortInfo> _getPortUsageInfo(int port) async {
-    try {
-      String command;
-      List<String> args;
-
-      if (Platform.isMacOS || Platform.isLinux) {
-        command = 'lsof';
-        args = ['-i', ':$port', '-t'];
-      } else if (Platform.isWindows) {
-        command = 'netstat';
-        args = ['-ano', '|', 'findstr', ':$port'];
-      } else {
-        return PortInfo(port: port, isOwnProcess: false);
-      }
-
-      final result = Process.runSync(command, args);
-      if (result.exitCode != 0) {
-        return PortInfo(port: port, isOwnProcess: false);
-      }
-
-      final output = result.stdout.toString().trim();
-      if (output.isEmpty) {
-        return PortInfo(port: port, isOwnProcess: false);
-      }
-
-      // 解析PID
-      final lines = output.split('\n');
-      if (lines.isEmpty) {
-        return PortInfo(port: port, isOwnProcess: false);
-      }
-
-      final pidLine = lines.first.trim();
-      final pid = int.tryParse(pidLine);
-      if (pid == null) {
-        return PortInfo(port: port, isOwnProcess: false);
-      }
-
-      // 检查是否是自己的进程
-      final isOwnProcess = pid == _currentPid;
-
-      // 获取进程信息
-      String? processName;
-      String? processCommand;
-
-      try {
-        if (Platform.isMacOS || Platform.isLinux) {
-          final psResult = Process.runSync('ps', ['-p', '$pid', '-o', 'comm=']);
-          processName = psResult.stdout.toString().trim();
-        } else if (Platform.isWindows) {
-          final tasklistResult = Process.runSync('tasklist', ['/FI', 'PID eq $pid', '/FO', 'CSV']);
-          final lines = tasklistResult.stdout.toString().split('\n');
-          if (lines.length > 1) {
-            final parts = lines[1].split(',');
-            if (parts.length > 0) {
-              processName = parts[0].replaceAll('"', '');
-            }
-          }
-        }
-      } catch (e) {
-        Logger.warning('Failed to get process info: $e');
-      }
-
-      return PortInfo(
-        port: port,
-        pid: pid,
-        processName: processName,
-        command: processCommand,
-        isOwnProcess: isOwnProcess,
-      );
-    } catch (e) {
-      Logger.warning('Failed to get port usage info: $e');
-      return PortInfo(port: port, isOwnProcess: false);
-    }
-  }
-
-  /// 检查端口是否被自己的应用占用
-  static Future<bool> isPortUsedByOwnApp(int port) async {
-    try {
-      final portInfo = await getPortInfo(port);
-      return portInfo.isOwnProcess;
-    } catch (e) {
-      return false;
-    }
-  }
+  ProxyServer({required this.config, required DnsResolver dnsResolver})
+      : _dnsResolver = dnsResolver;
 
   /// 启动默认代理服务器（监听单个端口）
   ///
   /// [config] 代理配置
+  /// [dnsResolver] DNS解析器实例
   /// 返回启动的代理服务器实例
-  static Future<ProxyServer> startDefault(ProxyConfig config) async {
+  static Future<ProxyServer> startDefault(
+      ProxyConfig config, DnsResolver dnsResolver) async {
     Logger.info('Starting default proxy server on single port');
-    
+
     // 创建代理服务器实例
-    final server = ProxyServer(config: config);
-    
+    final server = ProxyServer(config: config, dnsResolver: dnsResolver);
+
     // 启动默认代理（监听一个可用端口）
     await server._startDefault();
-    
+
     // 注册单例实例
     _instance = server;
-    
+
     return server;
   }
 
@@ -210,16 +63,17 @@ class ProxyServer {
   Future<void> _startDefault() async {
     try {
       Logger.info('Starting default proxy server on single port');
-      
+
       // 分配一个默认端口
       final port = await _allocateDefaultPort();
       _allocatedPorts = [port];
-      
+
       // 创建服务器socket并开始监听
       await _createServerSocket(port);
-      
+
       _isRunning = true;
-      Logger.info('Default proxy server started on port $port');
+      Logger.info(
+          'Default proxy server started on port $port (with HTTP/2 support)');
     } catch (e) {
       Logger.error('Failed to start default proxy server', e);
       rethrow;
@@ -231,47 +85,28 @@ class ProxyServer {
     // 优先使用配置中的端口池
     if (config.portPool != null && config.portPool!.isNotEmpty) {
       for (final port in config.portPool!) {
-        if (await isPortAvailable(port)) {
+        if (await PortUtils.isPortAvailable(port)) {
           return port;
         }
       }
     }
-    
+
     // 如果没有可用端口池，使用配置的端口范围
     final startPort = config.startPort ?? 4041;
     final endPort = config.endPort ?? (startPort + 100);
-    
+
     // 验证端口范围
     if (endPort <= startPort) {
-      throw Exception('endPort ($endPort) must be greater than startPort ($startPort)');
+      throw Exception(
+          'endPort ($endPort) must be greater than startPort ($startPort)');
     }
-    
-    // 首先在指定范围内寻找
-    for (int port = startPort; port <= endPort; port++) {
-      if (await isPortAvailable(port)) {
-        return port;
-      }
-    }
-    
-    // 如果指定范围内没有可用端口，向上突破范围寻找
-    Logger.warning('No available ports in range $startPort-$endPort, expanding search upward');
-    for (int port = endPort + 1; port <= endPort + 100; port++) {
-      if (await isPortAvailable(port)) {
-        Logger.info('Found available port $port outside configured range');
-        return port;
-      }
-    }
-    
-    // 如果向上突破也没有，向下突破范围寻找
-    Logger.warning('No available ports above $endPort, expanding search downward');
-    for (int port = startPort - 1; port >= startPort - 100; port--) {
-      if (port > 0 && await isPortAvailable(port)) {
-        Logger.info('Found available port $port outside configured range');
-        return port;
-      }
-    }
-    
-    throw Exception('No available ports found in range $startPort-$endPort or nearby ranges');
+
+    // 使用工具类查找可用端口
+    return await PortUtils.findAvailablePort(
+      startPort: startPort,
+      endPort: endPort,
+      maxAttempts: 100,
+    );
   }
 
   /// 启动代理服务器
@@ -305,7 +140,7 @@ class ProxyServer {
 
     serverSocket.listen(
       (client) {
-        _ClientHandler(client, this).handle();
+        _ClientHandler(client, this, port).handle();
       },
       onError: (error) {
         Logger.error('Proxy server error on port $port', error);
@@ -349,6 +184,14 @@ class ProxyServer {
     }
     // 返回第一个端口的地址作为主要地址
     return '${config.host}:${_allocatedPorts.first}';
+  }
+
+  /// 获取HTTP/2代理地址（现在与主代理地址相同）
+  String? getHttp2Address() {
+    if (!_isRunning) {
+      return null;
+    }
+    return getAddress();
   }
 
   /// 获取所有代理地址
@@ -402,6 +245,8 @@ class ProxyServer {
     required String targetDomain,
     String? name,
     String? description,
+    bool isSecure = true,
+    bool includeDomainInAuthority = true,
   }) async {
     if (!_isRunning) {
       Logger.warning('Proxy server is not running');
@@ -420,6 +265,8 @@ class ProxyServer {
       createdAt: DateTime.now(),
       name: name,
       description: description,
+      isSecure: isSecure,
+      includeDomainInAuthority: includeDomainInAuthority,
     );
 
     return await _mappingManager.addMapping(mapping);
@@ -432,12 +279,24 @@ class ProxyServer {
 
   /// 获取端口映射
   PortMapping? getMapping(int localPort) {
-    return _mappingManager.getMapping(localPort);
+    final mapping = _mappingManager.getMapping(localPort);
+    Logger.debug('getMapping($localPort) returned: ${mapping?.toString()}');
+    if (mapping != null) {
+      Logger.debug('  - isSecure: ${mapping.isSecure}');
+      Logger.debug('  - targetDomain: ${mapping.targetDomain}');
+      Logger.debug('  - targetPort: ${mapping.targetPort}');
+    }
+    return mapping;
   }
 
   /// 获取所有端口映射
   Map<int, PortMapping> getAllMappings() {
     return _mappingManager.getAllMappings();
+  }
+
+  /// 检查端口是否有映射
+  bool hasMapping(int localPort) {
+    return _mappingManager.hasMapping(localPort);
   }
 
   /// 注册端口监听（动态添加端口）
@@ -447,26 +306,26 @@ class ProxyServer {
   Future<bool> registerPort(int port) async {
     try {
       Logger.info('Registering port $port for listening');
-      
+
       // 检查端口是否已经在监听
       if (_allocatedPorts.contains(port)) {
         Logger.warning('Port $port is already being listened on');
         return true;
       }
-      
+
       // 检查端口是否可用
-      if (!await isPortAvailable(port)) {
+      if (!await PortUtils.isPortAvailable(port)) {
         Logger.error('Port $port is not available');
         return false;
       }
-      
+
       // 创建服务器socket并开始监听
       await _createServerSocket(port);
       _allocatedPorts.add(port);
-      
+
       // 注册到实例映射
       _instancesByPort[port] = this;
-      
+
       Logger.info('Successfully registered port $port for listening');
       return true;
     } catch (e) {
@@ -482,13 +341,13 @@ class ProxyServer {
   Future<bool> deregisterPort(int port) async {
     try {
       Logger.info('Deregistering port $port from listening');
-      
+
       // 检查端口是否在监听列表中
       if (!_allocatedPorts.contains(port)) {
         Logger.warning('Port $port is not being listened on');
         return true;
       }
-      
+
       // 找到对应的服务器socket并关闭
       final socketToRemove = _serverSockets.where((socket) {
         try {
@@ -497,7 +356,7 @@ class ProxyServer {
           return false;
         }
       }).toList();
-      
+
       for (final socket in socketToRemove) {
         try {
           await socket.close();
@@ -506,13 +365,16 @@ class ProxyServer {
           Logger.error('Error closing socket for port $port', e);
         }
       }
-      
+
       // 从端口列表中移除
       _allocatedPorts.remove(port);
-      
+
       // 从实例映射中移除
       _instancesByPort.remove(port);
-      
+
+      // 等待端口完全释放
+      await PortUtils.waitForPortRelease(port);
+
       Logger.info('Successfully deregistered port $port from listening');
       return true;
     } catch (e) {
@@ -541,36 +403,147 @@ class ProxyServer {
 class _ClientHandler {
   final Socket client;
   final ProxyServer proxyServer;
+  final int serverPort; // 添加服务器端口信息
   Socket? server;
-  String buffer = '';
+  List<int> buffer = []; // 改为List<int>来处理二进制数据
+  bool _isHttps = false; // 标记是否为HTTPS连接
+  bool _isHttp2 = false; // 标记是否为HTTP/2连接
+  bool _isWebSocket = false; // 标记是否为WebSocket连接
 
-  _ClientHandler(this.client, this.proxyServer);
+  _ClientHandler(this.client, this.proxyServer, this.serverPort);
 
   Future<void> handle() async {
-    client.listen(
+    // 使用asBroadcastStream()来允许多次订阅
+    final broadcastStream = client.asBroadcastStream();
+    StreamSubscription? clientSubscription;
+    clientSubscription = broadcastStream.listen(
       (data) async {
         if (server == null) {
-          buffer += utf8.decode(data);
+          buffer.addAll(data);
 
-          // 检查是否是 CONNECT 请求（HTTPS）
-          final connectMatch =
-              RegExp(r'CONNECT ([^ :]+):(\d+)').firstMatch(buffer);
-          if (connectMatch != null) {
-            await _handleConnectRequest(connectMatch);
-            return;
-          }
+          // 尝试解析请求头
+          final requestString = _tryDecodeBuffer();
+          if (requestString != null) {
+            // 智能协议检测 - 按优先级顺序检测
+            final protocolType = ProtocolUtils.detectProtocol(requestString);
 
-          // 检查是否是普通 HTTP 请求
-          final httpMatch =
-              RegExp(r'^([A-Z]+) ([^ ]+) HTTP/').firstMatch(buffer);
-          if (httpMatch != null) {
-            await _handleHttpRequest(httpMatch, buffer);
-            return;
+            // 记录协议检测结果
+            Logger.info('=== Protocol Detection ===');
+            Logger.info('Request preview: ${requestString.split('\n').first}');
+            Logger.info('Detected protocol: $protocolType');
+            Logger.info(
+                'Client connection: ${client.remoteAddress}:${client.remotePort}');
+            Logger.info('Server port: $serverPort');
+            Logger.info('=== End Protocol Detection ===');
+
+            switch (protocolType) {
+              case ProtocolType.http2:
+              case ProtocolType.grpc: // gRPC也使用HTTP/2处理
+                if (!_isHttp2) {
+                  // 避免重复处理
+                  _isHttp2 = true;
+                  await clientSubscription?.cancel();
+                  // 不需要传递initialData，因为broadcastStream已经包含了所有数据
+                  await _handleHttp2InternalForward(
+                      requestString, [], broadcastStream);
+                  return;
+                }
+                break;
+
+              case ProtocolType.websocket:
+                if (!_isWebSocket) {
+                  // 避免重复处理
+                  _isWebSocket = true;
+                  final success = await Http1Handler.handleWebSocketRequest(
+                      client,
+                      server,
+                      requestString,
+                      proxyServer._dnsResolver,
+                      proxyServer);
+                  if (!success) {
+                    throw Exception('Failed to handle WebSocket request');
+                  }
+                  return;
+                }
+                break;
+
+              case ProtocolType.https:
+                if (!_isHttps) {
+                  // 避免重复处理
+                  _isHttps = true;
+                  final connectMatch = RegExp(r'CONNECT ([^ :]+):(\d+)')
+                      .firstMatch(requestString);
+                  if (connectMatch != null) {
+                    final success = await Http1Handler.handleConnectRequest(
+                        client,
+                        server,
+                        connectMatch,
+                        proxyServer._dnsResolver,
+                        proxyServer);
+                    if (!success) {
+                      throw Exception('Failed to handle HTTPS CONNECT request');
+                    }
+                    return;
+                  }
+                }
+                break;
+
+              case ProtocolType.http:
+                if (!_isHttps && !_isHttp2 && !_isWebSocket) {
+                  // 避免重复处理
+                  final httpMatch = RegExp(r'^([A-Z]+) ([^ ]+) HTTP/')
+                      .firstMatch(requestString);
+                  if (httpMatch != null) {
+                    // 获取端口映射信息
+                    final mapping = proxyServer.getMapping(serverPort);
+                    final includeDomainInAuthority =
+                        mapping?.includeDomainInAuthority ?? true;
+
+                    final success = await Http1Handler.handleHttpRequest(
+                        client,
+                        server,
+                        httpMatch,
+                        requestString,
+                        proxyServer._dnsResolver,
+                        proxyServer,
+                        includeDomainInAuthority: includeDomainInAuthority);
+                    if (!success) {
+                      throw Exception('Failed to handle HTTP request');
+                    }
+                    return;
+                  }
+                }
+                break;
+
+              case ProtocolType.unknown:
+                // 只有在没有其他协议标记时才报告未知协议
+                if (!_isHttps && !_isHttp2 && !_isWebSocket) {
+                  Logger.warning(
+                      'Unrecognized protocol: ${requestString.split('\n').first}');
+                  close();
+                  return;
+                }
+                break;
+            }
           }
         } else {
           // 数据转发
           try {
-            server?.add(data);
+            if (_isHttp2) {
+              // HTTP/2数据：直接转发，不修改
+              Logger.debug('Client -> Server (HTTP/2): ${data.length} bytes');
+              server?.add(data);
+
+              // 添加数据转发监控
+              _logDataForwarding('Client -> Server', data.length, data.length);
+            } else {
+              // 其他协议直接转发
+              Logger.debug('Client -> Server (other): ${data.length} bytes');
+              server?.add(data);
+
+              // 添加数据转发监控
+              _logDataForwarding('Client -> Server', data.length, data.length);
+            }
           } catch (e) {
             Logger.error('Server socket error', e);
             close();
@@ -585,170 +558,544 @@ class _ClientHandler {
     );
   }
 
-  Future<void> _handleConnectRequest(RegExpMatch match) async {
-    String host = match.group(1)!;
-    int port = int.parse(match.group(2)!);
-
-    Logger.debug('Received CONNECT request: $host:$port');
-
+  /// 尝试安全地解码缓冲区数据
+  String? _tryDecodeBuffer() {
     try {
-      // 应用域名和端口映射
-      final mappedHost = _applyDomainMapping(host, port);
-      final mappedPort = _applyPortMapping(port);
+      // 查找HTTP请求的结束位置（\r\n\r\n）
+      final endIndex = _findHttpRequestEnd();
+      if (endIndex == -1) {
+        return null; // 数据不完整，等待更多数据
+      }
 
-      // HTTPDNS 解析
-      final ip = await ProxyServer.platform
-          .invokeMethod('resolveDomain', {'domain': mappedHost});
-      final targetIp =
-          (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
+      // 只解码HTTP头部部分
+      final headerBytes = buffer.sublist(0, endIndex);
+      final headerString = utf8.decode(headerBytes, allowMalformed: true);
 
-      Logger.info('Proxy resolution: $host:$port -> $targetIp:$mappedPort');
+      // 移除已处理的头部数据
+      buffer.removeRange(0, endIndex);
 
-      // 建立到真实服务器的连接
-      Logger.debug('Attempting to connect to $targetIp:$mappedPort');
-      server = await Socket.connect(targetIp, mappedPort,
-          timeout: const Duration(seconds: 10));
-
-      // 发送成功响应给客户端
-      client.add(utf8.encode('HTTP/1.1 200 Connection Established\r\n\r\n'));
-
-      Logger.debug('HTTPS connection established to $targetIp:$mappedPort');
-
-      // 设置双向转发
-      _setupBidirectionalForwarding();
+      return headerString;
     } catch (e) {
-      Logger.error('Failed to establish HTTPS connection to $host:$port', e);
-      final errorResponse =
-          'HTTP/1.1 502 Bad Gateway\r\nContent-Length: ${e.toString().length}\r\n\r\n${e.toString()}';
-      client.add(utf8.encode(errorResponse));
-      close();
+      Logger.error('Failed to decode buffer', e);
+      return null;
     }
   }
 
-  Future<void> _handleHttpRequest(RegExpMatch match, String request) async {
-    final method = match.group(1)!;
-    final url = match.group(2)!;
+  /// 查找HTTP请求的结束位置
+  int _findHttpRequestEnd() {
+    for (int i = 0; i < buffer.length - 3; i++) {
+      if (buffer[i] == 13 &&
+          buffer[i + 1] == 10 &&
+          buffer[i + 2] == 13 &&
+          buffer[i + 3] == 10) {
+        return i + 4; // 返回\r\n\r\n后的位置
+      }
+    }
+    return -1; // 未找到结束位置
+  }
 
-    Logger.debug('Received HTTP request: $method $url');
+  /// 处理HTTP/2请求 - 使用Http2Handler工具类
+  Future<void> _handleHttp2InternalForward(String requestString,
+      List<int> initialData, Stream<List<int>> broadcastStream) async {
+    Logger.debug('HTTP/2 internal forward: ${requestString.split('\n').first}');
 
+    // 记录HTTP/2请求开始时的详细信息
+    _logHttp2RequestStart(requestString);
+
+    const maxRetries = 2;
+    int retryCount = 0;
+
+    while (retryCount <= maxRetries) {
+      try {
+        // 使用服务器端口来获取正确的映射信息
+        final mappingResult =
+            MappingUtils.applyMapping('localhost', serverPort, proxyServer);
+
+        // 创建PortMapping对象
+        final mapping = PortMapping(
+          localPort: serverPort,
+          targetPort: mappingResult.mappedPort,
+          targetDomain: mappingResult.mappedHost,
+          createdAt: DateTime.now(),
+          isSecure: mappingResult.isSecure ?? true, // 默认使用安全连接
+        );
+
+        Logger.debug(
+            'HTTP/2 domain mapping: ${mappingResult.originalHost}:${mappingResult.originalPort} -> ${mappingResult.mappedHost}:${mappingResult.mappedPort} (isSecure: ${mappingResult.isSecure})');
+
+        // 记录DNS解析信息
+        Logger.info('HTTP/2 DNS resolution:');
+        Logger.info('  - Original domain: ${mappingResult.originalHost}');
+        Logger.info('  - Mapped domain: ${mappingResult.mappedHost}');
+        Logger.info('  - Original port: ${mappingResult.originalPort}');
+        Logger.info('  - Mapped port: ${mappingResult.mappedPort}');
+        Logger.info('  - Is secure: ${mappingResult.isSecure}');
+
+        // 使用Http2Handler处理HTTP/2连接，添加超时
+        final success = await Http2Handler.handleHttp2Connection(
+                client, mapping, proxyServer._dnsResolver,
+                initialData: initialData, clientStream: broadcastStream)
+            .timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw TimeoutException(
+                'HTTP/2 connection timeout after 30 seconds');
+          },
+        );
+
+        if (!success) {
+          throw Exception('Failed to handle HTTP/2 connection');
+        }
+
+        Logger.debug('HTTP/2 connection handled successfully');
+
+        // 添加连接成功后的详细日志
+        _logHttp2ConnectionSuccess(mapping);
+
+        // 验证连接是否真正建立
+        await _verifyHttp2Connection();
+
+        // 启动连接保持机制
+        _startConnectionKeepAlive();
+
+        return; // 成功，退出重试循环
+      } catch (e) {
+        retryCount++;
+        Logger.error('HTTP/2 connection attempt $retryCount failed', e);
+
+        // 检查是否应该重试
+        if (retryCount <= maxRetries && _shouldRetryHttp2Error(e)) {
+          Logger.info(
+              'Retrying HTTP/2 connection (attempt $retryCount/$maxRetries)');
+          await Future.delayed(Duration(seconds: retryCount)); // 递增延迟
+          continue;
+        }
+
+        // 不再重试，处理最终错误
+        await _handleHttp2Error(e);
+        return;
+      }
+    }
+  }
+
+  /// 记录HTTP/2请求开始时的详细信息
+  void _logHttp2RequestStart(String requestString) {
     try {
-      // 解析 URL
-      final uri = Uri.parse(url.startsWith('http') ? url : 'http://$url');
-      String host = uri.host;
-      int port = uri.port > 0 ? uri.port : 80;
+      Logger.info('=== HTTP/2 Request Start ===');
+      Logger.info(
+          'Request string: ${requestString.replaceAll('\n', '\\n').replaceAll('\r', '\\r')}');
 
-      // 应用域名和端口映射
-      final mappedHost = _applyDomainMapping(host, port);
-      final mappedPort = _applyPortMapping(port);
+      // 解析请求头信息
+      final lines = requestString.split('\r\n');
+      Logger.info('Request headers:');
+      for (final line in lines) {
+        if (line.isNotEmpty) {
+          Logger.info('  $line');
+        }
+      }
 
-      // HTTPDNS 解析
-      final ip = await ProxyServer.platform
-          .invokeMethod('resolveDomain', {'domain': mappedHost});
-      final targetIp =
-          (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
+      // 客户端连接信息
+      Logger.info('Client connection:');
+      Logger.info('  - Local address: ${client.address}');
+      Logger.info('  - Local port: ${client.port}');
+      Logger.info('  - Remote address: ${client.remoteAddress}');
+      Logger.info('  - Remote port: ${client.remotePort}');
 
-      Logger.info('Proxy resolution: $host:$port -> $targetIp:$mappedPort');
+      // 代理服务器信息
+      Logger.info('Proxy server info:');
+      Logger.info('  - Server port: $serverPort');
+      Logger.info('  - Allocated ports: ${proxyServer._allocatedPorts}');
+      Logger.info('  - Is running: ${proxyServer._isRunning}');
 
-      // 建立到真实服务器的连接
-      server = await Socket.connect(targetIp, mappedPort);
-
-      // 修改请求中的 Host 头
-      final modifiedRequest =
-          _modifyHttpRequest(request, mappedHost, mappedPort);
-      server!.add(utf8.encode(modifiedRequest));
-
-      Logger.debug('HTTP connection established to $targetIp:$mappedPort');
-
-      // 设置双向转发
-      _setupBidirectionalForwarding();
-    } catch (e) {
-      Logger.error('Failed to establish HTTP connection', e);
-      client.add(utf8.encode('HTTP/1.1 502 Bad Gateway\r\n\r\n'));
-      close();
-    }
-  }
-
-  String _applyDomainMapping(String host, int port) {
-    // 1. 如果请求包含明确域名，直接返回（Dio场景）
-    if (host != '127.0.0.1' && host != 'localhost') {
-      return host;
-    }
-    
-    // 2. 如果是localhost，查找动态端口映射
-    final dynamicMapping = proxyServer.getMapping(port);
-    if (dynamicMapping != null) {
-      Logger.info('Applied dynamic domain mapping: $host:$port -> ${dynamicMapping.targetDomain}');
-      return dynamicMapping.targetDomain;
-    }
-    
-    // 3. 没有映射，返回原始域名
-    return host;
-  }
-
-  int _applyPortMapping(int port) {
-    final originalPort = port;
-    
-    // 查找动态端口映射
-    final dynamicMapping = proxyServer.getMapping(port);
-    if (dynamicMapping != null && dynamicMapping.targetPort != null) {
-      Logger.info('Applied dynamic port mapping: $originalPort -> ${dynamicMapping.targetPort}');
-      return dynamicMapping.targetPort!;
-    }
-    
-    // 没有映射或targetPort为null，返回原始端口
-    return port;
-  }
-
-  String _modifyHttpRequest(String request, String host, int port) {
-    // 修改请求中的 Host 头
-    final lines = request.split('\r\n');
-    final modifiedLines = <String>[];
-
-    for (final line in lines) {
-      if (line.toLowerCase().startsWith('host:')) {
-        // 修改 Host 头
-        final portSuffix = port != 80 ? ':$port' : '';
-        modifiedLines.add('Host: $host$portSuffix');
+      // 映射信息
+      final mapping = proxyServer.getMapping(serverPort);
+      if (mapping != null) {
+        Logger.info('Port mapping:');
+        Logger.info('  - Local port: ${mapping.localPort}');
+        Logger.info('  - Target port: ${mapping.targetPort}');
+        Logger.info('  - Target domain: ${mapping.targetDomain}');
+        Logger.info('  - Name: ${mapping.name}');
+        Logger.info('  - Description: ${mapping.description}');
+        Logger.info('  - Is secure: ${mapping.isSecure}');
+        Logger.info('  - Created at: ${mapping.createdAt}');
       } else {
-        modifiedLines.add(line);
+        Logger.warning('Port mapping: Not found for port $serverPort');
+      }
+
+      Logger.info('=== End HTTP/2 Request Start ===');
+    } catch (e) {
+      Logger.error('Failed to log HTTP/2 request start details: $e');
+    }
+  }
+
+  /// 记录HTTP/2连接成功后的详细信息
+  void _logHttp2ConnectionSuccess(PortMapping mapping) {
+    try {
+      Logger.info('=== HTTP/2 Connection Success ===');
+      Logger.info('  - Local Port: ${mapping.localPort}');
+      Logger.info('  - Target Port: ${mapping.targetPort}');
+      Logger.info('  - Target Domain: ${mapping.targetDomain}');
+      Logger.info('  - Name: ${mapping.name ?? 'N/A'}');
+      Logger.info('  - Description: ${mapping.description ?? 'N/A'}');
+      Logger.info('  - Is Secure: ${mapping.isSecure}');
+      Logger.info(
+          '  - Created At: ${mapping.createdAt?.toIso8601String() ?? 'N/A'}');
+      Logger.info('=== End HTTP/2 Connection Success ===');
+    } catch (e) {
+      Logger.error('Failed to log HTTP/2 connection success details: $e');
+    }
+  }
+
+  /// 验证HTTP/2连接是否真正建立
+  Future<void> _verifyHttp2Connection() async {
+    try {
+      Logger.info('=== HTTP/2 Connection Verification ===');
+
+      // 检查客户端连接状态
+      Logger.info('Client connection status:');
+      Logger.info('  - Remote address: ${client.remoteAddress}');
+      Logger.info('  - Remote port: ${client.remotePort}');
+
+      // 对于HTTP/2连接，我们不需要验证server变量
+      // 因为HTTP/2连接是通过Http2Handler处理的，不依赖server变量
+      if (_isHttp2) {
+        Logger.info(
+            'HTTP/2 connection verification: PASSED - HTTP/2 connection established via Http2Handler');
+        Logger.info('  - HTTP/2 connection is managed by Http2Handler');
+        Logger.info('  - No direct server socket verification needed');
+      } else if (server != null) {
+        Logger.info('Server connection status:');
+        Logger.info('  - Remote address: ${server!.remoteAddress}');
+        Logger.info('  - Remote port: ${server!.remotePort}');
+
+        // 验证连接是否真正可用 - 通过尝试发送ping数据
+        try {
+          // 尝试发送一个小的ping数据来验证连接
+          final pingData = [
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00,
+            0x00
+          ];
+          server!.add(pingData);
+          Logger.info(
+              'HTTP/1 connection verification: PASSED - Ping sent successfully');
+        } catch (e) {
+          Logger.error(
+              'HTTP/1 connection verification: FAILED - Cannot send data: $e');
+          throw Exception(
+              'HTTP/1 connection verification failed - cannot send data: $e');
+        }
+      } else {
+        Logger.error('Connection verification: FAILED - No server connection');
+        throw Exception(
+            'Connection verification failed - no server connection');
+      }
+
+      Logger.info('=== End HTTP/2 Connection Verification ===');
+    } catch (e) {
+      Logger.error('HTTP/2 connection verification error: $e');
+      rethrow;
+    }
+  }
+
+  /// 启动连接保持机制
+  void _startConnectionKeepAlive() {
+    try {
+      Logger.info('Starting connection keep-alive mechanism');
+
+      // 设置定时器，每30秒检查一次连接状态
+      Timer.periodic(const Duration(seconds: 30), (timer) {
+        if (_isHttp2) {
+          // 对于HTTP/2连接，检查客户端连接状态
+          if (!_isConnectionClosed()) {
+            Logger.debug('HTTP/2 connection keep-alive check: OK');
+          } else {
+            Logger.warning(
+                'HTTP/2 connection keep-alive check: Connection lost');
+            timer.cancel();
+            close();
+          }
+        } else if (server != null && !_isConnectionClosed()) {
+          // 对于HTTP/1连接，检查服务器连接状态
+          Logger.debug('HTTP/1 connection keep-alive check: OK');
+        } else {
+          Logger.warning('Connection keep-alive check: Connection lost');
+          timer.cancel();
+          close();
+        }
+      });
+
+      Logger.info('Connection keep-alive mechanism started');
+    } catch (e) {
+      Logger.error('Failed to start connection keep-alive: $e');
+    }
+  }
+
+  /// 检查连接是否已关闭
+  bool _isConnectionClosed() {
+    try {
+      if (_isHttp2) {
+        // 对于HTTP/2连接，检查客户端连接状态
+        // 尝试访问客户端socket属性来检查连接状态
+        if (client != null) {
+          // 如果客户端socket仍然可用，说明连接仍然活跃
+          return false;
+        }
+        return true;
+      } else if (server != null) {
+        // 对于HTTP/1连接，检查服务器连接状态
+        // 如果socket为null或无法访问，说明连接已关闭
+        return false; // 假设连接仍然活跃
+      }
+      return true;
+    } catch (e) {
+      Logger.debug('Connection check error: $e');
+      return true; // 出错时假设连接已关闭
+    }
+  }
+
+  /// 判断是否应该重试HTTP/2错误
+  bool _shouldRetryHttp2Error(dynamic error) {
+    final errorString = error.toString().toLowerCase();
+
+    // 可重试的错误类型
+    final retryableErrors = [
+      'connection error',
+      'connection is being forcefully terminated',
+      'timeout',
+      'network error',
+      'connection refused',
+      'connection reset',
+    ];
+
+    // 不可重试的错误类型
+    final nonRetryableErrors = [
+      'authentication failed',
+      'unauthorized',
+      'forbidden',
+      'not found',
+      'bad request',
+      'invalid request',
+    ];
+
+    // 检查是否是不可重试的错误
+    for (final nonRetryable in nonRetryableErrors) {
+      if (errorString.contains(nonRetryable)) {
+        return false;
       }
     }
 
-    return modifiedLines.join('\r\n');
+    // 检查是否是可重试的错误
+    for (final retryable in retryableErrors) {
+      if (errorString.contains(retryable)) {
+        return true;
+      }
+    }
+
+    // 默认不重试未知错误
+    return false;
   }
 
-  void _setupBidirectionalForwarding() {
-    // 参考代码的方式：分离客户端和服务器数据处理
-    // 服务器数据转发到客户端
-    server!.listen(
-      (data) {
-        try {
-          client.add(data);
-        } catch (e) {
-          Logger.error('Client socket error', e);
-          close();
-        }
-      },
-      onError: (error) {
-        Logger.error('Server socket error: $error');
-        close();
-      },
-      onDone: () {
-        Logger.debug('Server connection closed');
-        close();
-      },
-    );
+  /// 处理HTTP/2错误
+  Future<void> _handleHttp2Error(dynamic error) async {
+    try {
+      // 记录详细的错误信息
+      Logger.error('HTTP/2 connection error details:', error);
 
-    // 注意：不要在这里再次监听client，因为client已经在handle()方法中被监听了
-    // 客户端数据直接通过handle()方法中的逻辑转发到服务器
+      // 记录请求的详细信息
+      _logHttp2RequestDetails();
+
+      // 检查是否是连接被强制终止的错误
+      if (error.toString().contains('forcefully terminated') ||
+          error.toString().contains('errorCode: 10')) {
+        Logger.warning(
+            'HTTP/2 connection was forcefully terminated - this may be due to proxy configuration issues');
+
+        // 尝试发送HTTP/2 GOAWAY帧
+        await _sendHttp2GoAwayFrame();
+      }
+
+      // 发送HTTP/1.1错误响应作为fallback
+      final errorResponse = _buildHttp11ErrorResponse(error);
+      client.add(utf8.encode(errorResponse));
+    } catch (sendError) {
+      Logger.error('Failed to send error response', sendError);
+      // 如果连错误响应都发送失败，直接关闭连接
+      close();
+    }
+  }
+
+  /// 记录HTTP/2请求的详细信息
+  void _logHttp2RequestDetails() {
+    try {
+      Logger.error('=== HTTP/2 Request Details ===');
+
+      // 客户端连接信息
+      Logger.error('Client connection:');
+      Logger.error('  - Local address: ${client.address}');
+      Logger.error('  - Local port: ${client.port}');
+      Logger.error('  - Remote address: ${client.remoteAddress}');
+      Logger.error('  - Remote port: ${client.remotePort}');
+
+      // 服务器连接信息
+      if (server != null) {
+        Logger.error('Server connection:');
+        Logger.error('  - Local address: ${server!.address}');
+        Logger.error('  - Local port: ${server!.port}');
+        Logger.error('  - Remote address: ${server!.remoteAddress}');
+        Logger.error('  - Remote port: ${server!.remotePort}');
+      } else {
+        Logger.error('Server connection: Not established');
+      }
+
+      // 代理服务器信息
+      Logger.error('Proxy server info:');
+      Logger.error('  - Server port: $serverPort');
+      Logger.error('  - Allocated ports: ${proxyServer._allocatedPorts}');
+      Logger.error('  - Is running: ${proxyServer._isRunning}');
+
+      // 映射信息
+      final mapping = proxyServer.getMapping(serverPort);
+      if (mapping != null) {
+        Logger.error('Port mapping:');
+        Logger.error('  - Local port: ${mapping.localPort}');
+        Logger.error('  - Target port: ${mapping.targetPort}');
+        Logger.error('  - Target domain: ${mapping.targetDomain}');
+        Logger.error('  - Name: ${mapping.name}');
+        Logger.error('  - Description: ${mapping.description}');
+        Logger.error('  - Is secure: ${mapping.isSecure}');
+        Logger.error('  - Created at: ${mapping.createdAt}');
+      } else {
+        Logger.error('Port mapping: Not found for port $serverPort');
+      }
+
+      // 缓冲区信息
+      Logger.error('Buffer info:');
+      Logger.error('  - Buffer size: ${buffer.length} bytes');
+      if (buffer.isNotEmpty) {
+        Logger.error('  - Buffer preview: ${buffer.take(100).toList()}');
+        try {
+          final bufferString =
+              utf8.decode(buffer.take(200).toList(), allowMalformed: true);
+          Logger.error(
+              '  - Buffer as string: ${bufferString.replaceAll('\n', '\\n').replaceAll('\r', '\\r')}');
+        } catch (e) {
+          Logger.error('  - Buffer decode error: $e');
+        }
+      }
+
+      // HTTP/2状态信息
+      Logger.error('HTTP/2 state:');
+      Logger.error('  - Is HTTP/2: $_isHttp2');
+      Logger.error('  - Is HTTPS: $_isHttps');
+      Logger.error('  - Is WebSocket: $_isWebSocket');
+
+      Logger.error('=== End HTTP/2 Request Details ===');
+    } catch (e) {
+      Logger.error('Failed to log HTTP/2 request details: $e');
+    }
+  }
+
+  /// 发送HTTP/2 GOAWAY帧
+  Future<void> _sendHttp2GoAwayFrame() async {
+    try {
+      // HTTP/2 GOAWAY帧格式
+      // 9字节帧头 + 8字节payload
+      final goAwayFrame = <int>[
+        // 帧长度 (8字节payload)
+        0x00, 0x00, 0x08,
+        // 帧类型 (7 = GOAWAY)
+        0x07,
+        // 标志位 (0)
+        0x00,
+        // 流标识符 (0)
+        0x00, 0x00, 0x00, 0x00,
+        // Payload: 最后处理的流ID (4字节) + 错误码 (4字节)
+        0x00, 0x00, 0x00, 0x00, // 最后处理的流ID
+        0x00, 0x00, 0x00, 0x0A, // 错误码 10 (INTERNAL_ERROR)
+      ];
+
+      client.add(goAwayFrame);
+      Logger.debug('Sent HTTP/2 GOAWAY frame');
+    } catch (e) {
+      Logger.error('Failed to send HTTP/2 GOAWAY frame', e);
+    }
+  }
+
+  /// 构建HTTP/1.1错误响应
+  String _buildHttp11ErrorResponse(dynamic error) {
+    final errorMessage = error.toString();
+    final timestamp = DateTime.now().toIso8601String();
+
+    // 获取请求信息
+    final requestInfo = _getRequestInfo();
+
+    final errorDetails = '''
+HTTP/2 Connection Error
+Error: $errorMessage
+Time: $timestamp
+Proxy: HTTPDNS Smart Proxy
+
+Request Information:
+$requestInfo
+
+Connection Details:
+- Client: ${client.address}:${client.port} -> ${client.remoteAddress}:${client.remotePort}
+- Server Port: $serverPort
+- Protocol: HTTP/2
+- Buffer Size: ${buffer.length} bytes
+''';
+
+    return 'HTTP/1.1 502 Bad Gateway\r\n'
+        'Content-Type: text/plain; charset=utf-8\r\n'
+        'Content-Length: ${errorDetails.length}\r\n'
+        'Connection: close\r\n'
+        '\r\n'
+        '$errorDetails';
+  }
+
+  /// 获取请求信息
+  String _getRequestInfo() {
+    try {
+      final mapping = proxyServer.getMapping(serverPort);
+      if (mapping != null) {
+        return '''
+- Local Port: ${mapping.localPort}
+- Target Port: ${mapping.targetPort}
+- Target Domain: ${mapping.targetDomain}
+- Name: ${mapping.name ?? 'N/A'}
+- Description: ${mapping.description ?? 'N/A'}
+- Is Secure: ${mapping.isSecure}
+- Created At: ${mapping.createdAt?.toIso8601String() ?? 'N/A'}''';
+      } else {
+        return '- Port Mapping: Not found for port $serverPort';
+      }
+    } catch (e) {
+      return '- Error getting request info: $e';
+    }
   }
 
   void close() {
     try {
+      Logger.debug('Closing HTTP/2 connection');
       client.destroy();
       server?.destroy();
+      Logger.debug('HTTP/2 connection closed successfully');
     } catch (e) {
       Logger.error('Error closing sockets', e);
     }
+  }
+
+  /// 添加数据转发监控日志
+  void _logDataForwarding(
+      String direction, int originalSize, int modifiedSize) {
+    Logger.debug(
+        'Data Forwarding: $direction - Original: $originalSize bytes, Modified: $modifiedSize bytes');
   }
 }

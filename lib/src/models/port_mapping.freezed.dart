@@ -41,6 +41,14 @@ mixin _$PortMapping {
   /// 是否激活
   bool get isActive => throw _privateConstructorUsedError;
 
+  /// 是否为安全连接 (HTTPS/TLS)
+  bool get isSecure => throw _privateConstructorUsedError;
+
+  /// 是否在:authority头部中包含域名信息
+  /// true: 包含域名信息 (api.example.com:443)
+  /// false: 只使用IP地址 (198.1.1.1:443)
+  bool get includeDomainInAuthority => throw _privateConstructorUsedError;
+
   Map<String, dynamic> toJson() => throw _privateConstructorUsedError;
   @JsonKey(ignore: true)
   $PortMappingCopyWith<PortMapping> get copyWith =>
@@ -60,7 +68,9 @@ abstract class $PortMappingCopyWith<$Res> {
       String? name,
       String? description,
       DateTime? createdAt,
-      bool isActive});
+      bool isActive,
+      bool isSecure,
+      bool includeDomainInAuthority});
 }
 
 /// @nodoc
@@ -83,6 +93,8 @@ class _$PortMappingCopyWithImpl<$Res, $Val extends PortMapping>
     Object? description = freezed,
     Object? createdAt = freezed,
     Object? isActive = null,
+    Object? isSecure = null,
+    Object? includeDomainInAuthority = null,
   }) {
     return _then(_value.copyWith(
       localPort: null == localPort
@@ -113,6 +125,14 @@ class _$PortMappingCopyWithImpl<$Res, $Val extends PortMapping>
           ? _value.isActive
           : isActive // ignore: cast_nullable_to_non_nullable
               as bool,
+      isSecure: null == isSecure
+          ? _value.isSecure
+          : isSecure // ignore: cast_nullable_to_non_nullable
+              as bool,
+      includeDomainInAuthority: null == includeDomainInAuthority
+          ? _value.includeDomainInAuthority
+          : includeDomainInAuthority // ignore: cast_nullable_to_non_nullable
+              as bool,
     ) as $Val);
   }
 }
@@ -132,7 +152,9 @@ abstract class _$$PortMappingImplCopyWith<$Res>
       String? name,
       String? description,
       DateTime? createdAt,
-      bool isActive});
+      bool isActive,
+      bool isSecure,
+      bool includeDomainInAuthority});
 }
 
 /// @nodoc
@@ -153,6 +175,8 @@ class __$$PortMappingImplCopyWithImpl<$Res>
     Object? description = freezed,
     Object? createdAt = freezed,
     Object? isActive = null,
+    Object? isSecure = null,
+    Object? includeDomainInAuthority = null,
   }) {
     return _then(_$PortMappingImpl(
       localPort: null == localPort
@@ -183,6 +207,14 @@ class __$$PortMappingImplCopyWithImpl<$Res>
           ? _value.isActive
           : isActive // ignore: cast_nullable_to_non_nullable
               as bool,
+      isSecure: null == isSecure
+          ? _value.isSecure
+          : isSecure // ignore: cast_nullable_to_non_nullable
+              as bool,
+      includeDomainInAuthority: null == includeDomainInAuthority
+          ? _value.includeDomainInAuthority
+          : includeDomainInAuthority // ignore: cast_nullable_to_non_nullable
+              as bool,
     ));
   }
 }
@@ -197,7 +229,9 @@ class _$PortMappingImpl implements _PortMapping {
       this.name,
       this.description,
       this.createdAt,
-      this.isActive = true});
+      this.isActive = true,
+      this.isSecure = true,
+      this.includeDomainInAuthority = true});
 
   factory _$PortMappingImpl.fromJson(Map<String, dynamic> json) =>
       _$$PortMappingImplFromJson(json);
@@ -231,9 +265,21 @@ class _$PortMappingImpl implements _PortMapping {
   @JsonKey()
   final bool isActive;
 
+  /// 是否为安全连接 (HTTPS/TLS)
+  @override
+  @JsonKey()
+  final bool isSecure;
+
+  /// 是否在:authority头部中包含域名信息
+  /// true: 包含域名信息 (api.example.com:443)
+  /// false: 只使用IP地址 (198.1.1.1:443)
+  @override
+  @JsonKey()
+  final bool includeDomainInAuthority;
+
   @override
   String toString() {
-    return 'PortMapping(localPort: $localPort, targetPort: $targetPort, targetDomain: $targetDomain, name: $name, description: $description, createdAt: $createdAt, isActive: $isActive)';
+    return 'PortMapping(localPort: $localPort, targetPort: $targetPort, targetDomain: $targetDomain, name: $name, description: $description, createdAt: $createdAt, isActive: $isActive, isSecure: $isSecure, includeDomainInAuthority: $includeDomainInAuthority)';
   }
 
   @override
@@ -253,13 +299,27 @@ class _$PortMappingImpl implements _PortMapping {
             (identical(other.createdAt, createdAt) ||
                 other.createdAt == createdAt) &&
             (identical(other.isActive, isActive) ||
-                other.isActive == isActive));
+                other.isActive == isActive) &&
+            (identical(other.isSecure, isSecure) ||
+                other.isSecure == isSecure) &&
+            (identical(
+                    other.includeDomainInAuthority, includeDomainInAuthority) ||
+                other.includeDomainInAuthority == includeDomainInAuthority));
   }
 
   @JsonKey(ignore: true)
   @override
-  int get hashCode => Object.hash(runtimeType, localPort, targetPort,
-      targetDomain, name, description, createdAt, isActive);
+  int get hashCode => Object.hash(
+      runtimeType,
+      localPort,
+      targetPort,
+      targetDomain,
+      name,
+      description,
+      createdAt,
+      isActive,
+      isSecure,
+      includeDomainInAuthority);
 
   @JsonKey(ignore: true)
   @override
@@ -283,7 +343,9 @@ abstract class _PortMapping implements PortMapping {
       final String? name,
       final String? description,
       final DateTime? createdAt,
-      final bool isActive}) = _$PortMappingImpl;
+      final bool isActive,
+      final bool isSecure,
+      final bool includeDomainInAuthority}) = _$PortMappingImpl;
 
   factory _PortMapping.fromJson(Map<String, dynamic> json) =
       _$PortMappingImpl.fromJson;
@@ -316,6 +378,16 @@ abstract class _PortMapping implements PortMapping {
 
   /// 是否激活
   bool get isActive;
+  @override
+
+  /// 是否为安全连接 (HTTPS/TLS)
+  bool get isSecure;
+  @override
+
+  /// 是否在:authority头部中包含域名信息
+  /// true: 包含域名信息 (api.example.com:443)
+  /// false: 只使用IP地址 (198.1.1.1:443)
+  bool get includeDomainInAuthority;
   @override
   @JsonKey(ignore: true)
   _$$PortMappingImplCopyWith<_$PortMappingImpl> get copyWith =>

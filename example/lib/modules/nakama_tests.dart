@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter_ali_http_dns/flutter_ali_http_dns.dart';
+import '../nakama_config.dart';
 
 /// Nakama场景测试模块 - 负责游戏SDK代理测试
 class NakamaTests {
@@ -23,13 +24,21 @@ class NakamaTests {
       return;
     }
 
+    // 验证Nakama配置
+    if (!NakamaConfig.isValid()) {
+      onLogMessage('错误: Nakama配置无效，请检查nakama_config.dart文件');
+      onResultUpdate('配置错误: 请设置正确的Nakama服务器域名');
+      return;
+    }
+
     try {
       onResultUpdate('正在测试 Nakama 代理...');
+      onLogMessage('使用Nakama服务器: ${NakamaConfig.nakamaBaseUrl}');
 
-      // 直接注册Nakama服务映射
+      // 注册Nakama服务映射
       final nakamaServices = [
-        {'name': 'nakama-http', 'targetPort': 7350},
-        {'name': 'nakama-grpc', 'targetPort': 7349},
+        {'name': 'nakama-http', 'targetPort': NakamaConfig.nakamaPortHttp, 'isSecure': true},
+        {'name': 'nakama-grpc', 'targetPort': NakamaConfig.nakamaPortGrpc, 'isSecure': false},
       ];
       
       final successfulMappings = <String, int>{};
@@ -38,11 +47,14 @@ class NakamaTests {
         final serviceName = service['name'] as String;
         final targetPort = service['targetPort'] as int;
         
+        onLogMessage('正在注册 $serviceName 映射到 ${NakamaConfig.nakamaBaseUrl}:$targetPort');
+        
         final localPort = await _dnsService.registerMapping(
           targetPort: targetPort,
-          targetDomain: 'api.game-service.com',
+          targetDomain: NakamaConfig.nakamaBaseUrl,
           name: serviceName,
           description: '$serviceName service mapping',
+          isSecure: service['isSecure'] as bool,
         );
         
         if (localPort != null) {
@@ -69,14 +81,18 @@ class NakamaTests {
         final localPort = entry.value;
         
         try {
+          onLogMessage('正在测试 $serviceName 连接 (localhost:$localPort)');
+          
           // 测试端口连接
           final request = await client.getUrl(Uri.parse('http://localhost:$localPort'));
           final response = await request.close();
           final responseBody = await response.transform(utf8.decoder).join();
           
           testResults.add('$serviceName ($localPort): 状态码 ${response.statusCode}, 响应长度 ${responseBody.length}');
+          onLogMessage('$serviceName 测试成功: 状态码 ${response.statusCode}');
         } catch (e) {
           testResults.add('$serviceName ($localPort): 连接失败 - $e');
+          onLogMessage('$serviceName 测试失败: $e');
         }
       }
 
@@ -85,6 +101,7 @@ class NakamaTests {
 
       onResultUpdate(
         'Nakama 代理测试完成\n'
+        '服务器: ${NakamaConfig.nakamaBaseUrl}\n'
         '成功注册的映射: ${successfulMappings.length}\n'
         '${testResults.join('\n')}\n'
         '端口映射详情: ${allMappings.length} 个映射'

@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'package:flutter/services.dart';
 
 import 'flutter_ali_http_dns_platform_interface.dart';
 import 'src/models/dns_config.dart';
@@ -6,11 +8,14 @@ import 'src/models/proxy_config.dart';
 import 'src/services/dns_resolver.dart';
 import 'src/services/proxy_server.dart';
 import 'src/utils/logger.dart';
+import 'src/utils/port_utils.dart';
+import 'src/utils/process_utils.dart';
 
 export 'src/models/dns_config.dart';
 export 'src/models/proxy_config.dart';
 export 'src/models/port_mapping.dart';
 export 'src/utils/logger.dart';
+export 'src/utils/port_utils.dart';
 
 /// Flutter 阿里云 HttpDNS 插件主类
 class FlutterAliHttpDns {
@@ -57,6 +62,9 @@ class FlutterAliHttpDns {
       Logger.info('Initializing DNS service with config: ${config.accountId}');
       Logger.debug(
           'Full config details: accountId=${config.accountId}, accessKeyId=${config.accessKeyId}, enableCache=${config.enableCache}');
+
+      // 清理可能存在的残留端口
+      await _cleanupStalePorts();
 
       final result = await _platform.initializeDns(config);
       Logger.info('Platform initialization result: $result');
@@ -158,8 +166,11 @@ class FlutterAliHttpDns {
       }
 
       // 启动默认代理服务器（用于Dio等普通场景）
-      _proxyServer = await ProxyServer.startDefault(config);
+      _proxyServer = await ProxyServer.startDefault(config, _dnsResolver);
       _isProxyRunning = true;
+
+      // 清理可能存在的旧映射（防止应用重启导致的映射冲突）
+      _cleanupStaleMappings();
 
       final address = _proxyServer!.getAddress();
       Logger.info('Default proxy server started successfully on $address');
@@ -216,6 +227,17 @@ class FlutterAliHttpDns {
     return _proxyServer!.getAddress();
   }
 
+  /// 获取HTTP/2代理地址
+  ///
+  /// 返回HTTP/2代理服务器地址字符串，格式为 "host:port"
+  Future<String?> getHttp2ProxyAddress() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return null;
+    }
+
+    return _proxyServer!.getHttp2Address();
+  }
+
   /// 获取所有代理地址
   ///
   /// 返回所有代理服务器地址列表，格式为 ["host:port1", "host:port2", ...]
@@ -224,7 +246,18 @@ class FlutterAliHttpDns {
       return [];
     }
 
-    return _proxyServer!.getAllAddresses();
+    final addresses = <String>[];
+    
+    // 添加HTTP/1.1代理地址
+    addresses.addAll(_proxyServer!.getAllAddresses());
+    
+    // 添加HTTP/2代理地址
+    final http2Address = _proxyServer!.getHttp2Address();
+    if (http2Address != null) {
+      addresses.add(http2Address);
+    }
+    
+    return addresses;
   }
 
   /// 获取主要端口（第一个端口）
@@ -256,12 +289,16 @@ class FlutterAliHttpDns {
   /// [targetDomain] 目标域名
   /// [name] 映射名称（可选）
   /// [description] 描述信息（可选）
+  /// [isSecure] 是否为安全连接（HTTPS/TLS），默认为true
+  /// [includeDomainInAuthority] 是否在:authority头部中包含域名信息，默认为true
   /// 返回注册成功的本地端口，失败时返回null
   Future<int?> registerMapping({
     int? targetPort,
     required String targetDomain,
     String? name,
     String? description,
+    bool isSecure = true,
+    bool includeDomainInAuthority = true,
   }) async {
     if (!_isProxyRunning || _proxyServer == null) {
       Logger.warning('Proxy server is not running');
@@ -285,13 +322,15 @@ class FlutterAliHttpDns {
         return null;
       }
 
-      // 注册端口映射
+            // 注册端口映射（PortMappingManager会自动处理重复映射）
       final mappingRegistered = await _proxyServer!.registerMapping(
         localPort: availablePort,
         targetPort: targetPort,
         targetDomain: targetDomain,
         name: name,
         description: description,
+        isSecure: isSecure,
+        includeDomainInAuthority: includeDomainInAuthority,
       );
 
       if (mappingRegistered) {
@@ -330,11 +369,16 @@ class FlutterAliHttpDns {
         if (portDeregistered) {
           Logger.info(
               'Successfully removed mapping and deregistered port $localPort');
+          
+          // 等待端口状态同步
+          await _waitForPortStateSync(localPort);
+          
+          return true;
         } else {
           Logger.warning(
               'Mapping removed but failed to deregister port $localPort');
+          return false;
         }
-        return true;
       } else {
         Logger.error('Failed to remove mapping for port $localPort');
         return false;
@@ -343,6 +387,24 @@ class FlutterAliHttpDns {
       Logger.error('Error removing mapping for port $localPort', e);
       return false;
     }
+  }
+
+  /// 等待端口状态同步
+  Future<void> _waitForPortStateSync(int port) async {
+    const maxWaitTime = Duration(seconds: 3);
+    const checkInterval = Duration(milliseconds: 50);
+    final startTime = DateTime.now();
+    
+    while (DateTime.now().difference(startTime) < maxWaitTime) {
+      // 检查端口是否真正可用
+      if (await _isPortTrulyAvailable(port)) {
+        Logger.debug('Port $port state synchronized successfully');
+        return;
+      }
+      await Future.delayed(checkInterval);
+    }
+    
+    Logger.warning('Port $port state may not be fully synchronized');
   }
 
   /// 获取端口映射
@@ -365,6 +427,7 @@ class FlutterAliHttpDns {
       'targetDomain': mapping.targetDomain,
       'createdAt': mapping.createdAt?.toIso8601String(),
       'isActive': mapping.isActive,
+      'isSecure': mapping.isSecure, // 添加isSecure字段
       'name': mapping.name,
       'description': mapping.description,
     };
@@ -389,6 +452,7 @@ class FlutterAliHttpDns {
         'targetDomain': mapping.targetDomain,
         'createdAt': mapping.createdAt?.toIso8601String(),
         'isActive': mapping.isActive,
+        'isSecure': mapping.isSecure, // 添加isSecure字段
         'name': mapping.name,
         'description': mapping.description,
       };
@@ -402,13 +466,7 @@ class FlutterAliHttpDns {
   /// [port] 端口号
   /// 返回端口是否可用
   Future<bool> isPortAvailable(int port) async {
-    try {
-      final socket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
-      await socket.close();
-      return true;
-    } catch (e) {
-      return false;
-    }
+    return await PortUtils.isPortAvailable(port);
   }
 
   /// 获取代理配置字符串
@@ -436,7 +494,7 @@ class FlutterAliHttpDns {
   /// [port] 要检查的端口号
   /// 返回端口占用信息，包括进程ID、进程名称等
   static Future<PortInfo> getPortInfo(int port) async {
-    return await ProxyServer.getPortInfo(port);
+    return await PortUtils.getPortInfo(port);
   }
 
   /// 获取当前应用进程ID
@@ -444,7 +502,7 @@ class FlutterAliHttpDns {
   /// 返回当前应用的进程ID
   static int getCurrentProcessId() {
     // 直接调用静态方法获取当前 PID
-    return ProxyServer.getCurrentPid();
+    return ProcessUtils.getCurrentPid();
   }
 
   /// 检查端口是否被自己的应用占用
@@ -592,7 +650,7 @@ class FlutterAliHttpDns {
     if (_proxyServer!.config.portPool != null &&
         _proxyServer!.config.portPool!.isNotEmpty) {
       for (final port in _proxyServer!.config.portPool!) {
-        if (await isPortAvailable(port) && !await isPortListening(port)) {
+        if (await _isPortTrulyAvailable(port)) {
           return port;
         }
       }
@@ -609,37 +667,89 @@ class FlutterAliHttpDns {
       return null;
     }
 
-    // 首先在指定范围内寻找
-    for (int port = startPort; port <= endPort; port++) {
-      if (await isPortAvailable(port) && !await isPortListening(port)) {
-        return port;
+    try {
+      // 使用PortUtils的findAvailablePort方法
+      return await PortUtils.findAvailablePort(
+        startPort: startPort,
+        endPort: endPort,
+        maxAttempts: 100,
+      );
+    } catch (e) {
+      Logger.error('Failed to find available port: $e');
+      return null;
+    }
+  }
+
+  /// 检查端口是否真正可用（包括端口可用性和映射状态）
+  Future<bool> _isPortTrulyAvailable(int port) async {
+    // 检查端口是否可用
+    if (!await isPortAvailable(port)) {
+      Logger.debug('Port $port is not available (system check failed)');
+      return false;
+    }
+    
+    // 检查端口是否正在被监听
+    if (await isPortListening(port)) {
+      Logger.debug('Port $port is being listened by proxy server');
+      return false;
+    }
+    
+    // 检查端口是否已经有映射
+    if (_proxyServer!.hasMapping(port)) {
+      Logger.debug('Port $port has existing mapping, not available');
+      return false;
+    }
+    
+    // 使用PortUtils的端口可用性验证
+    return await PortUtils.isPortTrulyAvailable(port);
+  }
+
+  /// 清理过期的映射（防止应用重启导致的映射冲突）
+  void _cleanupStaleMappings() {
+    if (_proxyServer == null) return;
+    
+    final allMappings = _proxyServer!.getAllMappings();
+    final staleMappings = <int>[];
+    
+    for (final entry in allMappings.entries) {
+      final port = entry.key;
+      final mapping = entry.value;
+      
+      // 检查映射是否过期（超过1小时）
+      if (mapping.createdAt == null) continue;
+      final age = DateTime.now().difference(mapping.createdAt!);
+      if (age.inHours > 1) {
+        staleMappings.add(port);
+        Logger.info('Found stale mapping for port $port (age: ${age.inMinutes} minutes)');
       }
     }
-
-    // 如果指定范围内没有可用端口，向上突破范围寻找
-    Logger.warning(
-        'No available ports in range $startPort-$endPort, expanding search upward');
-    for (int port = endPort + 1; port <= endPort + 100; port++) {
-      if (await isPortAvailable(port) && !await isPortListening(port)) {
-        Logger.info('Found available port $port outside configured range');
-        return port;
-      }
+    
+    // 清理过期映射
+    for (final port in staleMappings) {
+      _proxyServer!.removeMapping(port);
+      Logger.info('Cleaned up stale mapping for port $port');
     }
-
-    // 如果向上突破也没有，向下突破范围寻找
-    Logger.warning(
-        'No available ports above $endPort, expanding search downward');
-    for (int port = startPort - 1; port >= startPort - 100; port--) {
-      if (port > 0 &&
-          await isPortAvailable(port) &&
-          !await isPortListening(port)) {
-        Logger.info('Found available port $port outside configured range');
-        return port;
-      }
+    
+    if (staleMappings.isNotEmpty) {
+      Logger.info('Cleaned up ${staleMappings.length} stale mappings');
     }
+  }
 
-    Logger.error(
-        'No available ports found in range $startPort-$endPort or nearby ranges');
-    return null;
+  /// 清理残留端口
+  Future<void> _cleanupStalePorts() async {
+    try {
+      Logger.info('Cleaning up stale ports...');
+      
+      // 使用PortUtils清理常见的代理端口
+      final cleanedPorts = await PortUtils.cleanupCommonProxyPorts();
+      
+      if (cleanedPorts.isNotEmpty) {
+        Logger.info('Cleaned up ${cleanedPorts.length} stale ports: $cleanedPorts');
+      } else {
+        Logger.info('No stale ports found to clean up');
+      }
+    } catch (e) {
+      Logger.error('Error during port cleanup', e);
+    }
   }
 }

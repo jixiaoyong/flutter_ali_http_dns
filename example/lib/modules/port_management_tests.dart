@@ -61,6 +61,7 @@ class PortManagementTests {
           targetDomain: domain,
           name: serviceName,
           description: '$serviceName mapping',
+          isSecure: service['isSecure'] as bool? ?? true, // 默认使用安全连接
         );
         
         if (localPort != null) {

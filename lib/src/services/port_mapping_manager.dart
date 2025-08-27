@@ -9,8 +9,9 @@ class PortMappingManager {
   Future<bool> addMapping(PortMapping mapping) async {
     try {
       if (_mappings.containsKey(mapping.localPort)) {
-        Logger.warning('Port mapping for port ${mapping.localPort} already exists');
-        return false;
+        Logger.warning('Port mapping for port ${mapping.localPort} already exists, updating...');
+        // 移除旧的映射
+        _mappings.remove(mapping.localPort);
       }
       
       _mappings[mapping.localPort] = mapping;

@@ -68,6 +68,7 @@ class AdvancedTests {
             targetDomain: domain,
             name: serviceName,
             description: '$serviceName mapping',
+            isSecure: service['isSecure'] as bool? ?? true, // 默认使用安全连接
           );
           
           if (localPort != null) {
@@ -107,6 +108,7 @@ class AdvancedTests {
           await _dnsService.registerMapping(
             targetPort: 7350,
             targetDomain: 'test.com',
+            isSecure: true, // 测试使用安全连接
           );
         } catch (e) {
           onLogMessage('   Expected error when proxy not running: $e');
@@ -117,6 +119,7 @@ class AdvancedTests {
           await _dnsService.registerMapping(
             targetPort: 7350,
             targetDomain: 'test.com',
+            isSecure: true, // 测试使用安全连接
           );
         } catch (e) {
           onLogMessage('   Expected error for invalid mapping: $e');

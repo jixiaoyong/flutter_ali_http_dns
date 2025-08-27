@@ -107,4 +107,81 @@ class BasicTests {
       onLogMessage('Dio 测试失败: $e');
     }
   }
+
+  /// 测试Dio代理功能
+  Future<void> testDioProxy() async {
+    if (!isProxyRunning) {
+      onLogMessage('请先启动代理服务器');
+      return;
+    }
+
+    try {
+      onResultUpdate('正在测试 Dio 代理功能...');
+
+      // 配置Dio使用代理
+      final dio = Dio();
+      final proxyConfig = await _dnsService.getDioProxyConfig();
+
+      if (proxyConfig == null) {
+        onLogMessage('无法获取代理配置');
+        onResultUpdate('代理配置获取失败');
+        return;
+      }
+
+      onLogMessage('代理配置: ${proxyConfig['host']}:${proxyConfig['port']}');
+
+      dio.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () {
+          final client = HttpClient();
+          client.findProxy = (uri) => 'PROXY ${proxyConfig['host']}:${proxyConfig['port']}';
+          return client;
+        },
+      );
+
+      // 测试请求
+      final testUrls = [
+        'https://httpbin.org/ip',
+        'https://httpbin.org/user-agent',
+        'https://httpbin.org/headers',
+      ];
+
+      final results = <String>[];
+
+      for (final url in testUrls) {
+        try {
+          onLogMessage('测试请求: $url');
+          
+          final response = await dio.get(url);
+          
+          if (response.statusCode == 200) {
+            final result = '✅ $url - 成功 (${response.statusCode})';
+            onLogMessage(result);
+            results.add(result);
+          } else {
+            final result = '❌ $url - 失败 (${response.statusCode})';
+            onLogMessage(result);
+            results.add(result);
+          }
+        } catch (e) {
+          final result = '❌ $url - 错误: $e';
+          onLogMessage(result);
+          results.add(result);
+        }
+      }
+
+      final successCount = results.where((r) => r.contains('✅')).length;
+      final totalCount = results.length;
+
+      onResultUpdate(
+        'Dio 代理测试完成\n'
+        '成功: $successCount/$totalCount\n'
+        '代理地址: ${proxyConfig['host']}:${proxyConfig['port']}\n'
+        '详细结果:\n${results.join('\n')}'
+      );
+
+    } catch (e) {
+      onLogMessage('Dio代理测试失败: $e');
+      onResultUpdate('Dio代理测试失败: $e');
+    }
+  }
 }

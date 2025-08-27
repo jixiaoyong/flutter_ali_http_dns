@@ -17,6 +17,9 @@ _$PortMappingImpl _$$PortMappingImplFromJson(Map<String, dynamic> json) =>
           ? null
           : DateTime.parse(json['createdAt'] as String),
       isActive: json['isActive'] as bool? ?? true,
+      isSecure: json['isSecure'] as bool? ?? true,
+      includeDomainInAuthority:
+          json['includeDomainInAuthority'] as bool? ?? true,
     );
 
 Map<String, dynamic> _$$PortMappingImplToJson(_$PortMappingImpl instance) =>
@@ -28,4 +31,6 @@ Map<String, dynamic> _$$PortMappingImplToJson(_$PortMappingImpl instance) =>
       'description': instance.description,
       'createdAt': instance.createdAt?.toIso8601String(),
       'isActive': instance.isActive,
+      'isSecure': instance.isSecure,
+      'includeDomainInAuthority': instance.includeDomainInAuthority,
     };
