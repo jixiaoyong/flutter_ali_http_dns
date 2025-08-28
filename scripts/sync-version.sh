@@ -28,7 +28,7 @@ if [ ! -f "README.md" ]; then
     exit 1
 fi
 
-README_VERSION=$(grep -A 1 "dependencies:" README.md | grep "flutter_ali_http_dns:" | sed 's/.*flutter_ali_http_dns: \^//' | tr -d ' ')
+README_VERSION=$(grep -A 1 "dependencies:" README.md | grep "flutter_ali_http_dns: \^" | sed 's/.*flutter_ali_http_dns: \^//' | tr -d ' ')
 echo "📖 README.md 版本: $README_VERSION"
 
 # 检查版本号是否一致
@@ -51,7 +51,7 @@ else
     fi
     
     # 验证更新是否成功
-    NEW_README_VERSION=$(grep -A 1 "dependencies:" README.md | grep "flutter_ali_http_dns:" | sed 's/.*flutter_ali_http_dns: \^//' | tr -d ' ')
+    NEW_README_VERSION=$(grep -A 1 "dependencies:" README.md | grep "flutter_ali_http_dns: \^" | sed 's/.*flutter_ali_http_dns: \^//' | tr -d ' ')
     
     if [ "$PUBSPEC_VERSION" = "$NEW_README_VERSION" ]; then
         echo -e "${GREEN}✅ 版本号同步成功${NC}"

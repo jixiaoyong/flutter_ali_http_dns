@@ -2,6 +2,30 @@
 
 Demonstrates how to use the flutter_ali_http_dns plugin.
 
+## 依赖配置
+
+### 在您自己的项目中使用
+
+由于插件尚未发布到 pub.dev，请使用 GitHub 依赖：
+
+```yaml
+dependencies:
+  flutter_ali_http_dns:
+    git:
+      url: https://github.com/jixiaoyong/flutter_ali_http_dns
+      ref: master  # 或指定版本标签，如 v0.0.1
+```
+
+### 示例项目配置
+
+本示例项目使用 `path: ../` 依赖，因为它与插件在同一仓库中：
+
+```yaml
+dependencies:
+  flutter_ali_http_dns:
+    path: ../
+```
+
 ## 配置说明
 
 在使用此示例项目之前，您需要配置阿里云 HttpDNS 的认证信息：
