@@ -11,9 +11,6 @@ class ServiceManager {
   String _initializationStatus = '未初始化';
   String _lastError = '';
   DateTime? _lastInitializationTime;
-  int _totalResolutions = 0;
-  int _successfulResolutions = 0;
-  int _failedResolutions = 0;
   
   // 回调函数
   final Function(String) onLogMessage;
@@ -34,19 +31,15 @@ class ServiceManager {
   String get initializationStatus => _initializationStatus;
   String get lastError => _lastError;
   DateTime? get lastInitializationTime => _lastInitializationTime;
-  int get totalResolutions => _totalResolutions;
-  int get successfulResolutions => _successfulResolutions;
-  int get failedResolutions => _failedResolutions;
-  double get successRate => _totalResolutions > 0 ? (_successfulResolutions / _totalResolutions) * 100 : 0.0;
 
   /// DNS配置
-  DnsConfig get dnsConfig => const DnsConfig(
+  DnsConfig getDnsConfig({required bool enableCache, required bool enableSpeedTest}) => DnsConfig(
     accountId: AliHttpDnsCredentials.accountId,
     accessKeyId: AliHttpDnsCredentials.accessKeyId,
     accessKeySecret: AliHttpDnsCredentials.accessKeySecret,
-    enableCache: true,
+    enableCache: enableCache,
     maxCacheSize: 1000,
-    enableSpeedTest: true,
+    enableSpeedTest: enableSpeedTest,
     timeout: 5,
     preloadDomains: ['www.aliyun.com', 'www.taobao.com', 'www.tmall.com'],
     keepAliveDomains: ['www.aliyun.com'],
@@ -62,7 +55,7 @@ class ServiceManager {
   );
 
   /// 初始化DNS服务
-  Future<void> initializeDns() async {
+  Future<void> initializeDns({required bool enableCache, required bool enableSpeedTest}) async {
     try {
       _initializationStatus = '初始化中...';
       onStateChanged();
@@ -81,12 +74,15 @@ class ServiceManager {
         throw Exception('认证信息未完整配置');
       }
       
-      onLogMessage('开始初始化DNS服务...');
-      onLogMessage('配置信息: AccountId=${dnsConfig.accountId}, AccessKeyId=${dnsConfig.accessKeyId}');
-      onLogMessage('缓存设置: 启用=${dnsConfig.enableCache}, 大小=${dnsConfig.maxCacheSize}');
-      onLogMessage('预加载域名: ${dnsConfig.preloadDomains.join(', ')}');
+      final config = getDnsConfig(enableCache: enableCache, enableSpeedTest: enableSpeedTest);
       
-      final success = await _dnsService.initialize(dnsConfig);
+      onLogMessage('开始初始化DNS服务...');
+      onLogMessage('配置信息: AccountId=${config.accountId}, AccessKeyId=${config.accessKeyId}');
+      onLogMessage('缓存设置: 启用=${config.enableCache}, 大小=${config.maxCacheSize}');
+      onLogMessage('测速设置: 启用=${config.enableSpeedTest}');
+      onLogMessage('预加载域名: ${config.preloadDomains.join(', ')}');
+      
+      final success = await _dnsService.initialize(config);
       
       if (success) {
         _isInitialized = true;
@@ -177,53 +173,14 @@ class ServiceManager {
     }
   }
 
-  /// 记录解析统计
-  void recordResolution(bool success) {
-    _totalResolutions++;
-    if (success) {
-      _successfulResolutions++;
-    } else {
-      _failedResolutions++;
-    }
-    onStateChanged();
-  }
-
-  /// 获取缓存统计
-  Map<String, dynamic> getCacheStats() {
-    try {
-      // 由于FlutterAliHttpDns没有直接的缓存统计方法，返回基本统计信息
-      return {
-        'totalResolutions': _totalResolutions,
-        'successfulResolutions': _successfulResolutions,
-        'failedResolutions': _failedResolutions,
-        'successRate': successRate,
-        'isInitialized': _isInitialized,
-        'isProxyRunning': _isProxyRunning,
-      };
-    } catch (e) {
-      return {'error': e.toString()};
-    }
-  }
-
   /// 清除缓存
   void clearCache() {
     try {
-      // 由于FlutterAliHttpDns没有直接的清除缓存方法，重置统计信息
-      resetStats();
-      onLogMessage('DNS统计信息已重置');
+      onLogMessage('缓存清除功能暂未实现');
       onStateChanged();
     } catch (e) {
-      onLogMessage('重置统计失败: $e');
+      onLogMessage('清除缓存失败: $e');
     }
-  }
-
-  /// 重置统计
-  void resetStats() {
-    _totalResolutions = 0;
-    _successfulResolutions = 0;
-    _failedResolutions = 0;
-    onLogMessage('统计信息已重置');
-    onStateChanged();
   }
 
   /// 释放资源

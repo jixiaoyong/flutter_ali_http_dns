@@ -23,7 +23,12 @@ class DnsResolver {
     if (config.preloadDomains.isNotEmpty) {
       Logger.info('Preloading domains: ${config.preloadDomains}');
       for (final domain in config.preloadDomains) {
-        await resolve(domain);
+        final result = await resolve(domain, enableSystemDnsFallback: true);
+        if (result != null) {
+          Logger.debug('Preloaded domain: $domain -> $result');
+        } else {
+          Logger.warning('Failed to preload domain: $domain');
+        }
       }
     }
   }
@@ -31,8 +36,9 @@ class DnsResolver {
   /// 解析域名
   ///
   /// [domain] 要解析的域名
-  /// 返回解析后的 IP 地址，如果解析失败则返回原域名
-  Future<String> resolve(String domain) async {
+  /// [enableSystemDnsFallback] 是否启用系统DNS回退，默认为true
+  /// 返回解析后的 IP 地址，如果解析失败则返回 null
+  Future<String?> resolve(String domain, {bool enableSystemDnsFallback = true}) async {
     if (_config == null) {
       throw StateError('DnsResolver not initialized');
     }
@@ -48,8 +54,8 @@ class DnsResolver {
 
     // 检查网络连接
     if (!await _isNetworkAvailable()) {
-      Logger.warning('Network not available, returning original domain: $domain');
-      return domain;
+      Logger.warning('Network not available, returning null: $domain');
+      return null;
     }
 
     // 尝试HTTPDNS解析，带重试机制
@@ -64,10 +70,16 @@ class DnsResolver {
       return ip;
     }
 
-    // HTTPDNS失败，回退到系统DNS
-    Logger.warning(
-        'HTTPDNS resolution failed for $domain. Falling back to system DNS.');
-    return await resolveWithSystemDns(domain);
+    // 根据配置决定是否回退到系统DNS
+    if (enableSystemDnsFallback) {
+      Logger.warning(
+          'HTTPDNS resolution failed for $domain. Falling back to system DNS.');
+      return await resolveWithSystemDns(domain);
+    } else {
+      Logger.warning(
+          'HTTPDNS resolution failed for $domain. System fallback disabled.');
+      return null;
+    }
   }
 
   /// 带重试机制的HTTPDNS解析
@@ -119,7 +131,7 @@ class DnsResolver {
   }
 
   /// 使用系统DNS作为备选方案
-  Future<String> resolveWithSystemDns(String domain) async {
+  Future<String?> resolveWithSystemDns(String domain) async {
     try {
       Logger.debug('Resolving domain using system DNS: $domain');
       
@@ -141,8 +153,8 @@ class DnsResolver {
     }
 
     Logger.warning(
-        'All DNS resolution failed, returning original domain: $domain');
-    return domain;
+        'All DNS resolution failed, returning null: $domain');
+    return null;
   }
 
   /// 从缓存获取 IP

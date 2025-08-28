@@ -6,6 +6,7 @@ class AdvancedTests {
   final FlutterAliHttpDns _dnsService;
   final Function(String) onLogMessage;
   final Function(String) onResultUpdate;
+  final Function(String) onSnackBarMessage;
   final bool isInitialized;
   final bool isProxyRunning;
 
@@ -13,6 +14,7 @@ class AdvancedTests {
     required FlutterAliHttpDns dnsService,
     required this.onLogMessage,
     required this.onResultUpdate,
+    required this.onSnackBarMessage,
     required this.isInitialized,
     required this.isProxyRunning,
   }) : _dnsService = dnsService;
@@ -95,10 +97,12 @@ class AdvancedTests {
 
       onResultUpdate('高级功能测试完成');
       onLogMessage('Advanced features test completed successfully');
+      onSnackBarMessage('高级功能测试完成');
 
     } catch (e) {
       onLogMessage('Advanced features test failed: $e');
       onResultUpdate('高级功能测试失败: $e');
+      onSnackBarMessage('高级功能测试失败: ${e.toString().split(':').first}');
     }
   }
 
@@ -193,10 +197,12 @@ class AdvancedTests {
 
       onResultUpdate('性能测试完成');
       onLogMessage('Performance test completed successfully');
+      onSnackBarMessage('性能测试完成');
 
     } catch (e) {
       onLogMessage('Performance test failed: $e');
       onResultUpdate('性能测试失败: $e');
+      onSnackBarMessage('性能测试失败: ${e.toString().split(':').first}');
     }
   }
 
@@ -245,10 +251,12 @@ class AdvancedTests {
 
       onResultUpdate('错误处理测试完成');
       onLogMessage('Error handling test completed successfully');
+      onSnackBarMessage('错误处理测试完成');
 
     } catch (e) {
       onLogMessage('Error handling test failed: $e');
       onResultUpdate('错误处理测试失败: $e');
+      onSnackBarMessage('错误处理测试失败: ${e.toString().split(':').first}');
     }
   }
 }

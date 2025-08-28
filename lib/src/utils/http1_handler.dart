@@ -3,12 +3,11 @@ import 'dart:convert';
 import '../services/dns_resolver.dart';
 import '../utils/logger.dart';
 
-
 /// HTTP/1.1处理工具类
 /// 提供HTTP/1.1协议处理的通用方法
 class Http1Handler {
   /// 处理HTTP/1.1请求
-  /// 
+  ///
   /// [client] 客户端Socket连接
   /// [match] 正则匹配结果
   /// [request] 原始请求字符串
@@ -16,14 +15,9 @@ class Http1Handler {
   /// [proxyServer] 代理服务器实例（用于获取映射）
   /// [includeDomainInAuthority] 是否在Host头部中包含域名信息
   /// 返回建立的服务器连接，如果失败则返回null
-  static Future<Socket?> handleHttpRequest(
-    Socket client,
-    RegExpMatch match,
-    String request,
-    DnsResolver dnsResolver,
-    dynamic proxyServer,
-    {bool includeDomainInAuthority = true}
-  ) async {
+  static Future<Socket?> handleHttpRequest(Socket client, RegExpMatch match,
+      String request, DnsResolver dnsResolver, dynamic proxyServer,
+      {bool includeDomainInAuthority = true}) async {
     try {
       final method = match.group(1)!;
       final url = match.group(2)!;
@@ -52,9 +46,9 @@ class Http1Handler {
       // DNS 解析
       Logger.info('DNS resolution:');
       Logger.info('  - Domain to resolve: $mappedHost');
-      
+
       final ip = await dnsResolver.resolve(mappedHost);
-      final targetIp = (ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
+      final targetIp = (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
 
       Logger.info('  - Resolved IP: $targetIp');
       Logger.info('  - Final target: $targetIp:$mappedPort');
@@ -68,11 +62,13 @@ class Http1Handler {
       Logger.info('Establishing connection:');
       Logger.info('  - Target: $targetIp:$mappedPort');
       Logger.info('  - Method: $method');
-      
+
       final serverSocket = await Socket.connect(targetIp, mappedPort);
 
       // 修改请求中的 Host 头
-      final modifiedRequest = _modifyHttpRequest(request, mappedHost, mappedPort, includeDomainInAuthority: includeDomainInAuthority);
+      final modifiedRequest = _modifyHttpRequest(
+          request, mappedHost, mappedPort,
+          includeDomainInAuthority: includeDomainInAuthority);
       serverSocket.add(utf8.encode(modifiedRequest));
 
       Logger.info('Connection established successfully');
@@ -90,7 +86,7 @@ class Http1Handler {
   }
 
   /// 处理HTTPS CONNECT请求
-  /// 
+  ///
   /// [client] 客户端Socket连接
   /// [match] 正则匹配结果
   /// [dnsResolver] DNS解析器实例
@@ -120,8 +116,8 @@ class Http1Handler {
       // DNS 解析
       Logger.info('DNS resolution:');
       Logger.info('  - Domain to resolve: $mappedHost');
-      
-      final ip = await dnsResolver.resolve(mappedHost);
+
+      final ip = await dnsResolver.resolve(mappedHost) ?? mappedHost;
       final targetIp = (ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
 
       Logger.info('  - Resolved IP: $targetIp');
@@ -135,7 +131,7 @@ class Http1Handler {
       // 建立到真实服务器的连接
       Logger.info('Establishing HTTPS connection:');
       Logger.info('  - Target: $targetIp:$mappedPort');
-      
+
       final serverSocket = await Socket.connect(targetIp, mappedPort,
           timeout: const Duration(seconds: 10));
 
@@ -159,7 +155,7 @@ class Http1Handler {
   }
 
   /// 处理WebSocket请求
-  /// 
+  ///
   /// [client] 客户端Socket连接
   /// [requestString] 原始请求字符串
   /// [dnsResolver] DNS解析器实例
@@ -201,12 +197,11 @@ class Http1Handler {
       final mappedHost = host;
       final mappedPort = port;
 
-      Logger.debug(
-          'WebSocket direct forwarding: $host:$port');
+      Logger.debug('WebSocket direct forwarding: $host:$port');
 
       // DNS 解析
       final ip = await dnsResolver.resolve(mappedHost);
-      final targetIp = (ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
+      final targetIp = (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
 
       Logger.info(
           'WebSocket proxy resolution: $host:$port -> $targetIp:$mappedPort');
@@ -237,10 +232,9 @@ class Http1Handler {
     }
   }
 
-
-
   /// 修改HTTP请求中的Host头
-  static String _modifyHttpRequest(String request, String host, int port, {bool includeDomainInAuthority = true}) {
+  static String _modifyHttpRequest(String request, String host, int port,
+      {bool includeDomainInAuthority = true}) {
     // 修改请求中的 Host 头
     final lines = request.split('\r\n');
     final modifiedLines = <String>[];
@@ -283,7 +277,8 @@ class Http1Handler {
           try {
             clientToServerBytes += data.length;
             server.add(data);
-            Logger.debug('Client -> Server: ${data.length} bytes (Total: $clientToServerBytes)');
+            Logger.debug(
+                'Client -> Server: ${data.length} bytes (Total: $clientToServerBytes)');
           } catch (e) {
             Logger.error('Error forwarding data from client to server', e);
             _closeConnections(client, server);
@@ -295,7 +290,8 @@ class Http1Handler {
         _closeConnections(client, server);
       },
       onDone: () {
-        Logger.info('Client connection closed (Total bytes sent: $clientToServerBytes)');
+        Logger.info(
+            'Client connection closed (Total bytes sent: $clientToServerBytes)');
         clientClosed = true;
         _closeConnections(client, server);
       },
@@ -308,7 +304,8 @@ class Http1Handler {
           try {
             serverToClientBytes += data.length;
             client.add(data);
-            Logger.debug('Server -> Client: ${data.length} bytes (Total: $serverToClientBytes)');
+            Logger.debug(
+                'Server -> Client: ${data.length} bytes (Total: $serverToClientBytes)');
           } catch (e) {
             Logger.error('Error forwarding data from server to client', e);
             _closeConnections(client, server);
@@ -320,7 +317,8 @@ class Http1Handler {
         _closeConnections(client, server);
       },
       onDone: () {
-        Logger.info('Server connection closed (Total bytes sent: $serverToClientBytes)');
+        Logger.info(
+            'Server connection closed (Total bytes sent: $serverToClientBytes)');
         serverClosed = true;
         _closeConnections(client, server);
       },
@@ -334,7 +332,7 @@ class Http1Handler {
     } catch (e) {
       Logger.debug('Error closing client connection: $e');
     }
-    
+
     try {
       server.close();
     } catch (e) {

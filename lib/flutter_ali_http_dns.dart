@@ -81,33 +81,39 @@ class FlutterAliHttpDns {
     }
   }
 
-  /// 解析域名
+  /// 解析域名（可能返回 null）
   ///
   /// [domain] 要解析的域名
-  /// 返回解析后的 IP 地址，如果解析失败则返回原域名
-  Future<String> resolveDomain(String domain) async {
+  /// [enableSystemDnsFallback] 是否启用系统DNS回退，默认为true
+  /// 返回解析后的 IP 地址，如果解析失败则返回 null
+  Future<String?> resolveDomainNullable(String domain,
+      {bool enableSystemDnsFallback = true}) async {
     if (!_isInitialized) {
       throw StateError('DNS service not initialized. Call initialize() first.');
     }
 
     try {
-      Logger.debug('Resolving domain: $domain');
-      // 首先尝试从平台获取解析结果
-      final platformResult = await _platform.resolveDomain(domain);
-      if (platformResult != null && platformResult.isNotEmpty && platformResult != domain) {
-        Logger.info('Domain resolved by platform: $domain -> $platformResult');
-        return platformResult;
-      }
-
-      // 如果平台解析失败，使用 DnsResolver 的系统 DNS 方法
-      Logger.debug('Platform DNS failed, falling back to system DNS: $domain');
-      final systemResult = await _dnsResolver.resolveWithSystemDns(domain);
-      Logger.info('Domain resolved by system DNS: $domain -> $systemResult');
-      return systemResult;
+      Logger.debug(
+          'Resolving domain (nullable): $domain (system fallback: $enableSystemDnsFallback)');
+      // 统一使用 DnsResolver 进行解析
+      return await _dnsResolver.resolve(domain,
+          enableSystemDnsFallback: enableSystemDnsFallback);
     } catch (e) {
       Logger.error('Failed to resolve domain $domain', e);
-      return domain;
+      return null;
     }
+  }
+
+  /// 解析域名（失败时返回原域名）
+  ///
+  /// [domain] 要解析的域名
+  /// [enableSystemDnsFallback] 是否启用系统DNS回退，默认为true
+  /// 返回解析后的 IP 地址，如果解析失败则返回原域名
+  Future<String> resolveDomain(String domain,
+      {bool enableSystemDnsFallback = true}) async {
+    final result = await resolveDomainNullable(domain,
+        enableSystemDnsFallback: enableSystemDnsFallback);
+    return result ?? domain;
   }
 
   /// 启动代理服务器
@@ -167,8 +173,6 @@ class FlutterAliHttpDns {
       // 启动默认代理服务器（用于Dio等普通场景）
       _proxyServer = await ProxyServer.startDefault(config, _dnsResolver);
       _isProxyRunning = true;
-
-
 
       final address = _proxyServer!.getAddress();
       Logger.info('Default proxy server started successfully on $address');
@@ -244,18 +248,8 @@ class FlutterAliHttpDns {
       return [];
     }
 
-    final addresses = <String>[];
-    
-    // 添加HTTP/1.1代理地址
-    addresses.addAll(_proxyServer!.getAllAddresses());
-    
-    // 添加HTTP/2代理地址
-    final http2Address = _proxyServer!.getHttp2Address();
-    if (http2Address != null) {
-      addresses.add(http2Address);
-    }
-    
-    return addresses;
+    // 直接返回所有地址，避免重复
+    return _proxyServer!.getAllAddresses();
   }
 
   /// 获取主要端口（第一个端口）
@@ -280,16 +274,6 @@ class FlutterAliHttpDns {
 
     return _proxyServer!.allocatedPorts;
   }
-
-
-
-
-
-
-
-
-
-
 
   /// 检查端口是否可用
   ///
@@ -471,18 +455,17 @@ class FlutterAliHttpDns {
     Logger.info('Plugin resources disposed');
   }
 
-
-
   /// 清理残留端口
   Future<void> _cleanupStalePorts() async {
     try {
       Logger.info('Cleaning up stale ports...');
-      
+
       // 使用PortUtils清理常见的代理端口
       final cleanedPorts = await PortUtils.cleanupCommonProxyPorts();
-      
+
       if (cleanedPorts.isNotEmpty) {
-        Logger.info('Cleaned up ${cleanedPorts.length} stale ports: $cleanedPorts');
+        Logger.info(
+            'Cleaned up ${cleanedPorts.length} stale ports: $cleanedPorts');
       } else {
         Logger.info('No stale ports found to clean up');
       }

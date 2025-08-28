@@ -24,15 +24,15 @@ class Http2Handler {
     List<int>? initialData,
   }) async {
     Logger.debug('Starting HTTP/2 connection handling for port: $serverPort');
-    
+
     // 简化实现：直接转发数据，不进行复杂的映射处理
     try {
       // 创建服务器传输连接
       ServerTransportConnection? serverTransport;
-      
+
       serverTransport = ServerTransportConnection.viaSocket(clientSocket);
       Logger.debug('Using direct Socket for server transport');
-      
+
       Logger.debug('HTTP/2 connection setup completed');
       return true;
     } catch (e) {
@@ -60,25 +60,31 @@ class Http2Handler {
 
   /// 设置HTTP/2双向转发
   static void _setupBidirectionalForwarding(
-    ServerTransportConnection serverTransport,
-    ClientTransportConnection clientTransport,
-    String targetHost,
-    int targetPort,
-    bool isSecure,
-    {bool includeDomainInAuthority = true, String? resolvedIp}
-  ) {
+      ServerTransportConnection serverTransport,
+      ClientTransportConnection clientTransport,
+      String targetHost,
+      int targetPort,
+      bool isSecure,
+      {bool includeDomainInAuthority = true,
+      String? resolvedIp}) {
     try {
       // 客户端 -> 目标服务器
       // 使用cancelOnError: false 来防止Stream监听错误导致整个连接失败
       serverTransport.incomingStreams.listen(
         (ServerTransportStream stream) {
-          _handleClientStream(stream, clientTransport, targetHost, targetPort, isSecure, includeDomainInAuthority: includeDomainInAuthority, resolvedIp: resolvedIp);
+          _handleClientStream(
+              stream, clientTransport, targetHost, targetPort, isSecure,
+              includeDomainInAuthority: includeDomainInAuthority,
+              resolvedIp: resolvedIp);
         },
         onError: (error) {
           Logger.error('Error in server transport', error);
           // 对于Stream监听错误，我们尝试继续处理，而不是立即关闭连接
-          if (error.toString().contains('Stream has already been listened to')) {
-            Logger.warning('Stream already listened error detected, continuing...');
+          if (error
+              .toString()
+              .contains('Stream has already been listened to')) {
+            Logger.warning(
+                'Stream already listened error detected, continuing...');
           }
         },
         onDone: () {
@@ -98,13 +104,13 @@ class Http2Handler {
 
   /// 处理客户端流
   static void _handleClientStream(
-    ServerTransportStream clientStream,
-    ClientTransportConnection targetTransport,
-    String targetHost,
-    int targetPort,
-    bool isSecure,
-    {bool includeDomainInAuthority = true, String? resolvedIp}
-  ) {
+      ServerTransportStream clientStream,
+      ClientTransportConnection targetTransport,
+      String targetHost,
+      int targetPort,
+      bool isSecure,
+      {bool includeDomainInAuthority = true,
+      String? resolvedIp}) {
     Logger.debug('Handling client stream: ${clientStream.id}');
 
     // 使用一个标志来确保只处理一次头部消息
@@ -117,8 +123,10 @@ class Http2Handler {
         try {
           if (message is HeadersStreamMessage && !headersProcessed) {
             headersProcessed = true;
-            targetStream = await _handleClientHeaders(
-                clientStream, targetTransport, message, targetHost, targetPort, isSecure, includeDomainInAuthority: includeDomainInAuthority, resolvedIp: resolvedIp);
+            targetStream = await _handleClientHeaders(clientStream,
+                targetTransport, message, targetHost, targetPort, isSecure,
+                includeDomainInAuthority: includeDomainInAuthority,
+                resolvedIp: resolvedIp);
           } else if (message is DataStreamMessage && targetStream != null) {
             // 数据消息直接转发到目标流
             targetStream!.sendData(message.bytes, endStream: message.endStream);
@@ -135,7 +143,8 @@ class Http2Handler {
         Logger.error('Error in client stream', error);
         // 对于Stream监听错误，我们尝试继续处理
         if (error.toString().contains('Stream has already been listened to')) {
-          Logger.warning('Client stream already listened error detected, continuing...');
+          Logger.warning(
+              'Client stream already listened error detected, continuing...');
         } else {
           _sendErrorResponse(clientStream, 500, 'Stream Error');
           messageSubscription?.cancel();
@@ -151,14 +160,14 @@ class Http2Handler {
 
   /// 处理客户端头部
   static Future<ClientTransportStream?> _handleClientHeaders(
-    ServerTransportStream clientStream,
-    ClientTransportConnection targetTransport,
-    HeadersStreamMessage message,
-    String targetHost,
-    int targetPort,
-    bool isSecure,
-    {bool includeDomainInAuthority = true, String? resolvedIp}
-  ) async {
+      ServerTransportStream clientStream,
+      ClientTransportConnection targetTransport,
+      HeadersStreamMessage message,
+      String targetHost,
+      int targetPort,
+      bool isSecure,
+      {bool includeDomainInAuthority = true,
+      String? resolvedIp}) async {
     try {
       // 解析头部信息
       final headers = _parseHeaders(message.headers);
@@ -170,7 +179,10 @@ class Http2Handler {
       });
 
       // 修改头部信息（应用域名映射等）
-      final modifiedHeaders = _modifyHeaders(headers, targetHost, targetPort, isSecure: isSecure, includeDomainInAuthority: includeDomainInAuthority, resolvedIp: resolvedIp);
+      final modifiedHeaders = _modifyHeaders(headers, targetHost, targetPort,
+          isSecure: isSecure,
+          includeDomainInAuthority: includeDomainInAuthority,
+          resolvedIp: resolvedIp);
 
       // 记录修改后的头部信息
       Logger.debug('=== Modified Headers ===');
@@ -181,17 +193,21 @@ class Http2Handler {
       }
 
       // 创建目标请求
-      Logger.debug('Creating target request with ${modifiedHeaders.length} headers...');
+      Logger.debug(
+          'Creating target request with ${modifiedHeaders.length} headers...');
       ClientTransportStream targetStream;
       try {
-        targetStream = targetTransport.makeRequest(modifiedHeaders, endStream: false);
+        targetStream =
+            targetTransport.makeRequest(modifiedHeaders, endStream: false);
         Logger.debug('Target stream created successfully: ${targetStream.id}');
       } catch (e) {
         Logger.error('Failed to create target request: $e');
         if (e.toString().contains('forcefully terminated')) {
-          Logger.error('Target request creation failed due to forceful termination');
+          Logger.error(
+              'Target request creation failed due to forceful termination');
         }
-        _sendErrorResponse(clientStream, 502, 'Failed to create target request: $e');
+        _sendErrorResponse(
+            clientStream, 502, 'Failed to create target request: $e');
         return null;
       }
 
@@ -218,7 +234,7 @@ class Http2Handler {
     ClientTransportStream targetStream,
   ) {
     StreamSubscription? targetMessageSubscription;
-    
+
     // 目标服务器 -> 客户端
     targetMessageSubscription = targetStream.incomingMessages.listen(
       (message) {
@@ -241,13 +257,17 @@ class Http2Handler {
         Logger.error('Error in target stream', error);
         // 对于Stream监听错误，我们尝试继续处理
         if (error.toString().contains('Stream has already been listened to')) {
-          Logger.warning('Target stream already listened error detected, continuing...');
+          Logger.warning(
+              'Target stream already listened error detected, continuing...');
         } else if (error.toString().contains('forcefully terminated')) {
-          Logger.error('Target stream forcefully terminated - this may indicate a protocol mismatch');
-          Logger.error('This is likely the source of the gRPC "Connection is being forcefully terminated" error');
+          Logger.error(
+              'Target stream forcefully terminated - this may indicate a protocol mismatch');
+          Logger.error(
+              'This is likely the source of the gRPC "Connection is being forcefully terminated" error');
           // 尝试发送错误响应给客户端
           try {
-            _sendErrorResponse(clientStream, 502, 'Target connection terminated: $error');
+            _sendErrorResponse(
+                clientStream, 502, 'Target connection terminated: $error');
           } catch (e) {
             Logger.error('Failed to send error response', e);
           }
@@ -276,7 +296,10 @@ class Http2Handler {
 
   /// 修改头部信息
   static List<Header> _modifyHeaders(
-      Map<String, String> headers, String targetHost, int targetPort, {bool isSecure = true, bool includeDomainInAuthority = true, String? resolvedIp}) {
+      Map<String, String> headers, String targetHost, int targetPort,
+      {bool isSecure = true,
+      bool includeDomainInAuthority = true,
+      String? resolvedIp}) {
     final modifiedHeaders = <Header>[];
 
     // 检查是否为gRPC请求
@@ -285,8 +308,9 @@ class Http2Handler {
       Logger.debug(
           'Detected gRPC request, applying gRPC-specific header handling');
     }
-    
-    Logger.debug('Header modification - Target: $targetHost:$targetPort, Secure: $isSecure, gRPC: $isGrpc, IncludeDomain: $includeDomainInAuthority');
+
+    Logger.debug(
+        'Header modification - Target: $targetHost:$targetPort, Secure: $isSecure, gRPC: $isGrpc, IncludeDomain: $includeDomainInAuthority');
 
     for (final entry in headers.entries) {
       final name = entry.key;
@@ -300,20 +324,24 @@ class Http2Handler {
           if (targetPort == 443 || targetPort == 80) {
             // 标准端口：不包含端口号
             value = targetHost;
-            Logger.debug('Modified authority header: $name = $value (domain, standard port)');
+            Logger.debug(
+                'Modified authority header: $name = $value (domain, standard port)');
           } else {
             // 非标准端口：包含端口号
             value = '$targetHost:$targetPort';
-            Logger.debug('Modified authority header: $name = $value (domain, non-standard port)');
+            Logger.debug(
+                'Modified authority header: $name = $value (domain, non-standard port)');
           }
         } else {
           // 不包含域名信息：保持原始头部不变
-          Logger.debug('Keeping original authority header: $name = $value (no modification)');
+          Logger.debug(
+              'Keeping original authority header: $name = $value (no modification)');
         }
       } else if (name == ':scheme') {
         // 根据连接类型设置正确的scheme
         value = isSecure ? 'https' : 'http';
-        Logger.debug('Modified HTTP/2 scheme header: $name = $value (secure: $isSecure)');
+        Logger.debug(
+            'Modified HTTP/2 scheme header: $name = $value (secure: $isSecure)');
       } else if (name.startsWith(':')) {
         // 其他伪头部（如:method, :path）保持不变
         Logger.debug('HTTP/2 pseudo-header: $name = $value');
@@ -331,7 +359,8 @@ class Http2Handler {
       modifiedHeaders.add(Header.ascii(name, value));
     }
 
-    Logger.debug('Header modification completed - ${modifiedHeaders.length} headers processed');
+    Logger.debug(
+        'Header modification completed - ${modifiedHeaders.length} headers processed');
     return modifiedHeaders;
   }
 
@@ -359,7 +388,7 @@ class Http2Handler {
       String domain, DnsResolver dnsResolver) async {
     try {
       final ip = await dnsResolver.resolve(domain);
-      if (ip.isNotEmpty && ip != domain) {
+      if (ip != null && ip.isNotEmpty && ip != domain) {
         Logger.info('DNS resolution: $domain -> $ip');
         return ip;
       }

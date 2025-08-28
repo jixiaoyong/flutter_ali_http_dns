@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'modules/modules.dart';
-import 'modules/diagnostic_tools.dart';
 
 void main() {
   runApp(const MyApp());
@@ -45,6 +44,18 @@ class _MyHomePageState extends State<MyHomePage> {
   String _dioResult = '点击按钮开始测试';
   String _advancedResult = '点击按钮开始测试';
   String _logMessages = '';
+  
+  // 配置选项
+  bool _enableSystemDnsFallback = true;
+  bool _enableCache = true;
+  bool _enableSpeedTest = true;
+  
+  // 当前显示的测试结果
+  String _currentTestResult = '点击按钮开始测试';
+  String _currentTestTitle = '测试结果';
+  
+  // 日志滚动控制器
+  final ScrollController _logScrollController = ScrollController();
 
   @override
   void initState() {
@@ -66,14 +77,16 @@ class _MyHomePageState extends State<MyHomePage> {
       dnsService: _serviceManager.dnsService,
       onLogMessage: _addLogMessage,
       onResultUpdate: (result) => setState(() => _resolutionResult = result),
+      onSnackBarMessage: _showSnackBar,
       isProxyRunning: _serviceManager.isProxyRunning,
-      onRecordResolution: _serviceManager.recordResolution,
+      enableSystemDnsFallback: _enableSystemDnsFallback,
     );
 
     _advancedTests = AdvancedTests(
       dnsService: _serviceManager.dnsService,
       onLogMessage: _addLogMessage,
       onResultUpdate: (result) => setState(() => _advancedResult = result),
+      onSnackBarMessage: _showSnackBar,
       isInitialized: _serviceManager.isInitialized,
       isProxyRunning: _serviceManager.isProxyRunning,
     );
@@ -85,13 +98,16 @@ class _MyHomePageState extends State<MyHomePage> {
       dnsService: _serviceManager.dnsService,
       onLogMessage: _addLogMessage,
       onResultUpdate: (result) => setState(() => _resolutionResult = result),
+      onSnackBarMessage: _showSnackBar,
       isProxyRunning: _serviceManager.isProxyRunning,
+      enableSystemDnsFallback: _enableSystemDnsFallback,
     );
 
     _advancedTests = AdvancedTests(
       dnsService: _serviceManager.dnsService,
       onLogMessage: _addLogMessage,
       onResultUpdate: (result) => setState(() => _advancedResult = result),
+      onSnackBarMessage: _showSnackBar,
       isInitialized: _serviceManager.isInitialized,
       isProxyRunning: _serviceManager.isProxyRunning,
     );
@@ -101,6 +117,33 @@ class _MyHomePageState extends State<MyHomePage> {
   void _addLogMessage(String message) {
     setState(() {
       _logMessages = '${DateTime.now().toString().substring(11, 19)} $message\n$_logMessages';
+    });
+    // 滚动到最新日志
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScrollController.hasClients) {
+        _logScrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+  
+  /// 添加日志分割线
+  void _addLogDivider() {
+    setState(() {
+      _logMessages = '${DateTime.now().toString().substring(11, 19)} ========================================\n$_logMessages';
+    });
+    // 滚动到最新日志
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScrollController.hasClients) {
+        _logScrollController.animateTo(
+          0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
     });
   }
 
@@ -119,7 +162,10 @@ class _MyHomePageState extends State<MyHomePage> {
 
   /// 初始化DNS
   Future<void> _initializeDns() async {
-    await _serviceManager.initializeDns();
+    await _serviceManager.initializeDns(
+      enableCache: _enableCache,
+      enableSpeedTest: _enableSpeedTest,
+    );
   }
 
   /// 启动代理
@@ -136,42 +182,106 @@ class _MyHomePageState extends State<MyHomePage> {
   void _clearCache() {
     _serviceManager.clearCache();
   }
-
-  /// 重置统计
-  void _resetStats() {
-    _serviceManager.resetStats();
+  
+  /// 切换系统DNS回退
+  void _toggleSystemDnsFallback(bool value) {
+    setState(() {
+      _enableSystemDnsFallback = value;
+    });
   }
+  
+  /// 切换缓存启用
+  void _toggleCache(bool value) {
+    setState(() {
+      _enableCache = value;
+    });
+  }
+  
+  /// 切换测速启用
+  void _toggleSpeedTest(bool value) {
+    setState(() {
+      _enableSpeedTest = value;
+    });
+  }
+
+
 
   /// 测试域名解析
   Future<void> _testDomainResolution() async {
+    setState(() {
+      _currentTestTitle = '域名解析结果';
+      _currentTestResult = '正在测试...';
+    });
+    _addLogDivider();
     await _basicTests.testDomainResolution();
+    setState(() {
+      _currentTestResult = _resolutionResult;
+    });
   }
 
   /// 测试HttpClient
   Future<void> _testHttpClient() async {
+    setState(() {
+      _currentTestTitle = 'HttpClient 测试结果';
+      _currentTestResult = '正在测试...';
+    });
+    _addLogDivider();
     await _basicTests.testHttpClient();
-    setState(() => _httpResult = _resolutionResult);
+    setState(() {
+      _currentTestResult = _httpResult;
+    });
   }
 
   /// 测试Dio
   Future<void> _testDio() async {
+    setState(() {
+      _currentTestTitle = 'Dio 测试结果';
+      _currentTestResult = '正在测试...';
+    });
+    _addLogDivider();
     await _basicTests.testDio();
-    setState(() => _dioResult = _resolutionResult);
+    setState(() {
+      _currentTestResult = _dioResult;
+    });
   }
 
   /// 测试高级功能
   Future<void> _testAdvancedFeatures() async {
+    setState(() {
+      _currentTestTitle = '高级功能测试结果';
+      _currentTestResult = '正在测试...';
+    });
+    _addLogDivider();
     await _advancedTests.testAdvancedFeatures();
+    setState(() {
+      _currentTestResult = _advancedResult;
+    });
   }
 
   /// 测试性能
   Future<void> _testPerformance() async {
+    setState(() {
+      _currentTestTitle = '性能测试结果';
+      _currentTestResult = '正在测试...';
+    });
+    _addLogDivider();
     await _advancedTests.testPerformance();
+    setState(() {
+      _currentTestResult = _advancedResult;
+    });
   }
 
   /// 测试错误处理
   Future<void> _testErrorHandling() async {
+    setState(() {
+      _currentTestTitle = '错误处理测试结果';
+      _currentTestResult = '正在测试...';
+    });
+    _addLogDivider();
     await _advancedTests.testErrorHandling();
+    setState(() {
+      _currentTestResult = _advancedResult;
+    });
   }
 
   /// 清除日志
@@ -203,10 +313,6 @@ class _MyHomePageState extends State<MyHomePage> {
               initializationStatus: _serviceManager.initializationStatus,
               lastError: _serviceManager.lastError,
               lastInitializationTime: _serviceManager.lastInitializationTime,
-              totalResolutions: _serviceManager.totalResolutions,
-              successfulResolutions: _serviceManager.successfulResolutions,
-              failedResolutions: _serviceManager.failedResolutions,
-              successRate: _serviceManager.successRate,
             ),
             const SizedBox(height: 16),
 
@@ -215,11 +321,16 @@ class _MyHomePageState extends State<MyHomePage> {
               context: context,
               isInitialized: _serviceManager.isInitialized,
               isProxyRunning: _serviceManager.isProxyRunning,
+              enableSystemDnsFallback: _enableSystemDnsFallback,
+              enableCache: _enableCache,
+              enableSpeedTest: _enableSpeedTest,
               onInitializeDns: _initializeDns,
               onStartProxy: _startProxy,
               onStopProxy: _stopProxy,
               onClearCache: _clearCache,
-              onResetStats: _resetStats,
+              onSystemDnsFallbackChanged: _toggleSystemDnsFallback,
+              onCacheChanged: _toggleCache,
+              onSpeedTestChanged: _toggleSpeedTest,
             ),
             const SizedBox(height: 16),
 
@@ -242,35 +353,11 @@ class _MyHomePageState extends State<MyHomePage> {
             ),
             const SizedBox(height: 16),
 
-            // 域名解析结果
+            // 测试结果
             UIComponents.buildResultCard(
               context: context,
-              title: '域名解析结果',
-              result: _resolutionResult,
-            ),
-            const SizedBox(height: 16),
-
-            // HttpClient测试结果
-            UIComponents.buildResultCard(
-              context: context,
-              title: 'HttpClient 测试结果',
-              result: _httpResult,
-            ),
-            const SizedBox(height: 16),
-
-            // Dio测试结果
-            UIComponents.buildResultCard(
-              context: context,
-              title: 'Dio 测试结果',
-              result: _dioResult,
-            ),
-            const SizedBox(height: 16),
-
-            // 高级功能测试结果
-            UIComponents.buildResultCard(
-              context: context,
-              title: '高级功能测试结果',
-              result: _advancedResult,
+              title: _currentTestTitle,
+              result: _currentTestResult,
             ),
             const SizedBox(height: 16),
 
@@ -279,6 +366,7 @@ class _MyHomePageState extends State<MyHomePage> {
               context: context,
               logMessages: _logMessages,
               onClearLogs: _clearLogs,
+              scrollController: _logScrollController,
             ),
           ],
         ),
@@ -289,6 +377,7 @@ class _MyHomePageState extends State<MyHomePage> {
   @override
   void dispose() {
     _serviceManager.dispose();
+    _logScrollController.dispose();
     super.dispose();
   }
 }

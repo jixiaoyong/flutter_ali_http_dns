@@ -9,15 +9,17 @@ class BasicTests {
   final FlutterAliHttpDns _dnsService;
   final Function(String) onLogMessage;
   final Function(String) onResultUpdate;
+  final Function(String) onSnackBarMessage;
   final bool isProxyRunning;
-  final Function(bool)? onRecordResolution; // 添加解析统计回调
+  final bool enableSystemDnsFallback;
 
   BasicTests({
     required FlutterAliHttpDns dnsService,
     required this.onLogMessage,
     required this.onResultUpdate,
+    required this.onSnackBarMessage,
     required this.isProxyRunning,
-    this.onRecordResolution,
+    required this.enableSystemDnsFallback,
   }) : _dnsService = dnsService;
 
   /// 测试域名解析
@@ -33,21 +35,18 @@ class BasicTests {
       for (final domain in domains) {
         try {
           onLogMessage('开始解析域名: $domain');
-          final ip = await _dnsService.resolveDomain(domain);
+          final ip = await _dnsService.resolveDomain(domain, enableSystemDnsFallback: enableSystemDnsFallback);
           
           if (ip != domain && ip.isNotEmpty) {
             results.add('✅ $domain -> $ip');
             successCount++;
-            onRecordResolution?.call(true); // 记录成功解析
             onLogMessage('域名解析成功: $domain -> $ip');
           } else {
             results.add('❌ $domain -> 解析失败 (返回原域名)');
-            onRecordResolution?.call(false); // 记录失败解析
             onLogMessage('域名解析失败: $domain (返回原域名)');
           }
         } catch (e) {
           results.add('❌ $domain -> 解析错误: $e');
-          onRecordResolution?.call(false); // 记录失败解析
           onLogMessage('域名解析异常: $domain -> $e');
         }
       }
@@ -57,6 +56,22 @@ class BasicTests {
       
       onResultUpdate('$summary\n\n${results.join('\n')}');
       onLogMessage('域名解析测试完成: $summary');
+      
+      // 显示 SnackBar 消息
+      if (successCount > 0) {
+        final firstSuccess = results.firstWhere(
+          (result) => result.startsWith('✅'),
+          orElse: () => '',
+        );
+        if (firstSuccess.isNotEmpty) {
+          final parts = firstSuccess.split(' -> ');
+          if (parts.length == 2) {
+            onSnackBarMessage('解析成功: ${parts[0].substring(2)} -> ${parts[1]}');
+          }
+        }
+      } else {
+        onSnackBarMessage('域名解析失败，请检查网络连接');
+      }
     } catch (e) {
       onResultUpdate('解析错误: $e');
       onLogMessage('域名解析测试失败: $e');
@@ -91,9 +106,11 @@ class BasicTests {
       
       onResultUpdate(result);
       onLogMessage('HttpClient 测试成功: 状态码 ${response.statusCode}');
+      onSnackBarMessage('HttpClient 测试成功: 状态码 ${response.statusCode}');
     } catch (e) {
       onResultUpdate('HttpClient 请求错误: $e');
       onLogMessage('HttpClient 测试失败: $e');
+      onSnackBarMessage('HttpClient 测试失败: ${e.toString().split(':').first}');
     }
   }
 
@@ -135,9 +152,11 @@ class BasicTests {
       
       onResultUpdate(result);
       onLogMessage('Dio 测试成功: 状态码 ${response.statusCode}');
+      onSnackBarMessage('Dio 测试成功: 状态码 ${response.statusCode}');
     } catch (e) {
       onResultUpdate('Dio 请求错误: $e');
       onLogMessage('Dio 测试失败: $e');
+      onSnackBarMessage('Dio 测试失败: ${e.toString().split(':').first}');
     }
   }
 
