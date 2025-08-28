@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'modules/modules.dart';
+import 'modules/diagnostic_tools.dart';
 
 void main() {
   runApp(const MyApp());
@@ -66,6 +67,7 @@ class _MyHomePageState extends State<MyHomePage> {
       onLogMessage: _addLogMessage,
       onResultUpdate: (result) => setState(() => _resolutionResult = result),
       isProxyRunning: _serviceManager.isProxyRunning,
+      onRecordResolution: _serviceManager.recordResolution,
     );
 
     _advancedTests = AdvancedTests(
@@ -130,6 +132,16 @@ class _MyHomePageState extends State<MyHomePage> {
     await _serviceManager.stopProxy();
   }
 
+  /// 清除缓存
+  void _clearCache() {
+    _serviceManager.clearCache();
+  }
+
+  /// 重置统计
+  void _resetStats() {
+    _serviceManager.resetStats();
+  }
+
   /// 测试域名解析
   Future<void> _testDomainResolution() async {
     await _basicTests.testDomainResolution();
@@ -175,6 +187,7 @@ class _MyHomePageState extends State<MyHomePage> {
       appBar: AppBar(
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: Text(widget.title),
+        elevation: 2,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -187,6 +200,13 @@ class _MyHomePageState extends State<MyHomePage> {
               isInitialized: _serviceManager.isInitialized,
               isProxyRunning: _serviceManager.isProxyRunning,
               proxyAddress: _serviceManager.proxyAddress,
+              initializationStatus: _serviceManager.initializationStatus,
+              lastError: _serviceManager.lastError,
+              lastInitializationTime: _serviceManager.lastInitializationTime,
+              totalResolutions: _serviceManager.totalResolutions,
+              successfulResolutions: _serviceManager.successfulResolutions,
+              failedResolutions: _serviceManager.failedResolutions,
+              successRate: _serviceManager.successRate,
             ),
             const SizedBox(height: 16),
 
@@ -198,6 +218,8 @@ class _MyHomePageState extends State<MyHomePage> {
               onInitializeDns: _initializeDns,
               onStartProxy: _startProxy,
               onStopProxy: _stopProxy,
+              onClearCache: _clearCache,
+              onResetStats: _resetStats,
             ),
             const SizedBox(height: 16),
 

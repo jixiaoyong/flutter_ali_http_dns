@@ -94,15 +94,16 @@ class FlutterAliHttpDns {
       Logger.debug('Resolving domain: $domain');
       // 首先尝试从平台获取解析结果
       final platformResult = await _platform.resolveDomain(domain);
-      if (platformResult != null && platformResult != domain) {
-        Logger.info('Domain resolved: $domain -> $platformResult');
+      if (platformResult != null && platformResult.isNotEmpty && platformResult != domain) {
+        Logger.info('Domain resolved by platform: $domain -> $platformResult');
         return platformResult;
       }
 
-      // 如果平台解析失败，使用本地解析器
-      final localResult = await _dnsResolver.resolve(domain);
-      Logger.info('Domain resolved locally: $domain -> $localResult');
-      return localResult;
+      // 如果平台解析失败，使用 DnsResolver 的系统 DNS 方法
+      Logger.debug('Platform DNS failed, falling back to system DNS: $domain');
+      final systemResult = await _dnsResolver.resolveWithSystemDns(domain);
+      Logger.info('Domain resolved by system DNS: $domain -> $systemResult');
+      return systemResult;
     } catch (e) {
       Logger.error('Failed to resolve domain $domain', e);
       return domain;

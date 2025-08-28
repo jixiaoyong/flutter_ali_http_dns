@@ -342,14 +342,14 @@ class _ClientHandler {
   bool _isHttps = false; // 标记是否为HTTPS连接
   bool _isHttp2 = false; // 标记是否为HTTP/2连接
   bool _isWebSocket = false; // 标记是否为WebSocket连接
+  StreamSubscription? clientSubscription;
+  StreamSubscription? serverSubscription;
 
   _ClientHandler(this.client, this.proxyServer, this.serverPort);
 
   Future<void> handle() async {
-    // 使用asBroadcastStream()来允许多次订阅
-    final broadcastStream = client.asBroadcastStream();
-    StreamSubscription? clientSubscription;
-    clientSubscription = broadcastStream.listen(
+    // 直接使用client.listen，避免asBroadcastStream的问题
+    clientSubscription = client.listen(
       (data) async {
         if (server == null) {
           buffer.addAll(data);
@@ -376,9 +376,9 @@ class _ClientHandler {
                   // 避免重复处理
                   _isHttp2 = true;
                   await clientSubscription?.cancel();
-                  // 不需要传递initialData，因为broadcastStream已经包含了所有数据
+                  // 传递client作为数据源
                   await _handleHttp2InternalForward(
-                      requestString, [], broadcastStream);
+                      requestString, [], client);
                   return;
                 }
                 break;
@@ -387,14 +387,40 @@ class _ClientHandler {
                 if (!_isWebSocket) {
                   // 避免重复处理
                   _isWebSocket = true;
-                  final success = await Http1Handler.handleWebSocketRequest(
+                  final serverSocket = await Http1Handler.handleWebSocketRequest(
                       client,
-                      server,
                       requestString,
                       proxyServer._dnsResolver,
                       proxyServer);
-                  if (!success) {
+                  if (serverSocket == null) {
                     throw Exception('Failed to handle WebSocket request');
+                  }
+                  
+                  // 设置服务器连接
+                  server = serverSocket;
+                  
+                  // 设置服务器端数据监听（用于WebSocket双向转发）
+                  if (server != null) {
+                    serverSubscription = server!.listen(
+                      (data) {
+                        try {
+                          Logger.debug('Server -> Client (WebSocket): ${data.length} bytes');
+                          client.add(data);
+                          _logDataForwarding('Server -> Client', data.length, data.length);
+                        } catch (e) {
+                          Logger.error('Client socket error during server->client forwarding', e);
+                          close();
+                        }
+                      },
+                      onError: (error) {
+                        Logger.error('Server socket error', error);
+                        close();
+                      },
+                      onDone: () {
+                        Logger.debug('Server connection closed');
+                        close();
+                      },
+                    );
                   }
                   return;
                 }
@@ -407,14 +433,40 @@ class _ClientHandler {
                   final connectMatch = RegExp(r'CONNECT ([^ :]+):(\d+)')
                       .firstMatch(requestString);
                   if (connectMatch != null) {
-                    final success = await Http1Handler.handleConnectRequest(
+                    final serverSocket = await Http1Handler.handleConnectRequest(
                         client,
-                        server,
                         connectMatch,
                         proxyServer._dnsResolver,
                         proxyServer);
-                    if (!success) {
+                    if (serverSocket == null) {
                       throw Exception('Failed to handle HTTPS CONNECT request');
+                    }
+                    
+                    // 设置服务器连接
+                    server = serverSocket;
+                    
+                    // 设置服务器端数据监听（用于HTTPS双向转发）
+                    if (server != null) {
+                      serverSubscription = server!.listen(
+                        (data) {
+                          try {
+                            Logger.debug('Server -> Client (HTTPS): ${data.length} bytes');
+                            client.add(data);
+                            _logDataForwarding('Server -> Client', data.length, data.length);
+                          } catch (e) {
+                            Logger.error('Client socket error during server->client forwarding', e);
+                            close();
+                          }
+                        },
+                        onError: (error) {
+                          Logger.error('Server socket error', error);
+                          close();
+                        },
+                        onDone: () {
+                          Logger.debug('Server connection closed');
+                          close();
+                        },
+                      );
                     }
                     return;
                   }
@@ -427,15 +479,41 @@ class _ClientHandler {
                   final httpMatch = RegExp(r'^([A-Z]+) ([^ ]+) HTTP/')
                       .firstMatch(requestString);
                   if (httpMatch != null) {
-                    final success = await Http1Handler.handleHttpRequest(
+                    final serverSocket = await Http1Handler.handleHttpRequest(
                         client,
-                        server,
                         httpMatch,
                         requestString,
                         proxyServer._dnsResolver,
                         proxyServer);
-                    if (!success) {
+                    if (serverSocket == null) {
                       throw Exception('Failed to handle HTTP request');
+                    }
+                    
+                    // 设置服务器连接
+                    server = serverSocket;
+                    
+                    // 设置服务器端数据监听（用于HTTP双向转发）
+                    if (server != null) {
+                      serverSubscription = server!.listen(
+                        (data) {
+                          try {
+                            Logger.debug('Server -> Client (HTTP): ${data.length} bytes');
+                            client.add(data);
+                            _logDataForwarding('Server -> Client', data.length, data.length);
+                          } catch (e) {
+                            Logger.error('Client socket error during server->client forwarding', e);
+                            close();
+                          }
+                        },
+                        onError: (error) {
+                          Logger.error('Server socket error', error);
+                          close();
+                        },
+                        onDone: () {
+                          Logger.debug('Server connection closed');
+                          close();
+                        },
+                      );
                     }
                     return;
                   }
@@ -523,7 +601,7 @@ class _ClientHandler {
 
   /// 处理HTTP/2请求 - 使用Http2Handler工具类
   Future<void> _handleHttp2InternalForward(String requestString,
-      List<int> initialData, Stream<List<int>> broadcastStream) async {
+      List<int> initialData, Socket clientSocket) async {
     Logger.debug('HTTP/2 internal forward: ${requestString.split('\n').first}');
 
     // 记录HTTP/2请求开始时的详细信息
@@ -536,8 +614,8 @@ class _ClientHandler {
       try {
         // 使用Http2Handler处理HTTP/2连接，添加超时
         final success = await Http2Handler.handleHttp2Connection(
-                client, serverPort, proxyServer._dnsResolver,
-                initialData: initialData, clientStream: broadcastStream)
+                clientSocket, serverPort, proxyServer._dnsResolver,
+                initialData: initialData)
             .timeout(
           const Duration(seconds: 30),
           onTimeout: () {
@@ -931,12 +1009,18 @@ Connection Details:
 
   void close() {
     try {
-      Logger.debug('Closing HTTP/2 connection');
+      Logger.debug('Closing connection');
+      
+      // 取消订阅
+      clientSubscription?.cancel();
+      serverSubscription?.cancel();
+      
+      // 关闭连接
       client.destroy();
       server?.destroy();
-      Logger.debug('HTTP/2 connection closed successfully');
+      Logger.debug('Connection closed successfully');
     } catch (e) {
-      Logger.error('Error closing sockets', e);
+      Logger.error('Error closing connection', e);
     }
   }
 

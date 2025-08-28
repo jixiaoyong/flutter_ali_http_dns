@@ -10,16 +10,14 @@ class Http1Handler {
   /// 处理HTTP/1.1请求
   /// 
   /// [client] 客户端Socket连接
-  /// [server] 服务器Socket连接
   /// [match] 正则匹配结果
   /// [request] 原始请求字符串
   /// [dnsResolver] DNS解析器实例
   /// [proxyServer] 代理服务器实例（用于获取映射）
   /// [includeDomainInAuthority] 是否在Host头部中包含域名信息
-  /// 返回处理是否成功
-  static Future<bool> handleHttpRequest(
+  /// 返回建立的服务器连接，如果失败则返回null
+  static Future<Socket?> handleHttpRequest(
     Socket client,
-    Socket? server,
     RegExpMatch match,
     String request,
     DnsResolver dnsResolver,
@@ -71,40 +69,35 @@ class Http1Handler {
       Logger.info('  - Target: $targetIp:$mappedPort');
       Logger.info('  - Method: $method');
       
-      server = await Socket.connect(targetIp, mappedPort);
+      final serverSocket = await Socket.connect(targetIp, mappedPort);
 
       // 修改请求中的 Host 头
       final modifiedRequest = _modifyHttpRequest(request, mappedHost, mappedPort, includeDomainInAuthority: includeDomainInAuthority);
-      server.add(utf8.encode(modifiedRequest));
+      serverSocket.add(utf8.encode(modifiedRequest));
 
       Logger.info('Connection established successfully');
       Logger.info('Modified request sent to target server');
       Logger.info('=== End HTTP/1.1 Request Processing ===');
 
-      // 设置双向转发
-      _setupBidirectionalForwarding(client, server);
-
-      return true;
+      return serverSocket;
     } catch (e) {
       Logger.error('=== HTTP/1.1 Request Failed ===');
       Logger.error('Error details: $e');
       Logger.error('=== End HTTP/1.1 Request Failed ===');
       client.add(utf8.encode('HTTP/1.1 502 Bad Gateway\r\n\r\n'));
-      return false;
+      return null;
     }
   }
 
   /// 处理HTTPS CONNECT请求
   /// 
   /// [client] 客户端Socket连接
-  /// [server] 服务器Socket连接
   /// [match] 正则匹配结果
   /// [dnsResolver] DNS解析器实例
   /// [proxyServer] 代理服务器实例（用于获取映射）
-  /// 返回处理是否成功
-  static Future<bool> handleConnectRequest(
+  /// 返回建立的服务器连接，如果失败则返回null
+  static Future<Socket?> handleConnectRequest(
     Socket client,
-    Socket? server,
     RegExpMatch match,
     DnsResolver dnsResolver,
     dynamic proxyServer,
@@ -143,7 +136,7 @@ class Http1Handler {
       Logger.info('Establishing HTTPS connection:');
       Logger.info('  - Target: $targetIp:$mappedPort');
       
-      server = await Socket.connect(targetIp, mappedPort,
+      final serverSocket = await Socket.connect(targetIp, mappedPort,
           timeout: const Duration(seconds: 10));
 
       // 发送成功响应给客户端
@@ -153,10 +146,7 @@ class Http1Handler {
       Logger.info('CONNECT response sent to client');
       Logger.info('=== End HTTPS CONNECT Request Processing ===');
 
-      // 设置双向转发
-      _setupBidirectionalForwarding(client, server);
-
-      return true;
+      return serverSocket;
     } catch (e) {
       Logger.error('=== HTTPS CONNECT Request Failed ===');
       Logger.error('Error details: $e');
@@ -164,21 +154,19 @@ class Http1Handler {
       final errorResponse =
           'HTTP/1.1 502 Bad Gateway\r\nContent-Length: ${e.toString().length}\r\n\r\n${e.toString()}';
       client.add(utf8.encode(errorResponse));
-      return false;
+      return null;
     }
   }
 
   /// 处理WebSocket请求
   /// 
   /// [client] 客户端Socket连接
-  /// [server] 服务器Socket连接
   /// [requestString] 原始请求字符串
   /// [dnsResolver] DNS解析器实例
   /// [proxyServer] 代理服务器实例（用于获取映射）
-  /// 返回处理是否成功
-  static Future<bool> handleWebSocketRequest(
+  /// 返回建立的服务器连接，如果失败则返回null
+  static Future<Socket?> handleWebSocketRequest(
     Socket client,
-    Socket? server,
     String requestString,
     DnsResolver dnsResolver,
     dynamic proxyServer,
@@ -231,24 +219,21 @@ class Http1Handler {
       // 建立到真实服务器的连接
       Logger.debug(
           'Attempting to establish WebSocket connection to $targetIp:$mappedPort');
-      server = await Socket.connect(targetIp, mappedPort,
+      final serverSocket = await Socket.connect(targetIp, mappedPort,
           timeout: const Duration(seconds: 10));
 
       // 转发WebSocket握手请求到服务器
-      server.add(utf8.encode(requestString));
+      serverSocket.add(utf8.encode(requestString));
 
       Logger.debug('WebSocket connection established to $targetIp:$mappedPort');
 
-      // 设置双向转发
-      _setupBidirectionalForwarding(client, server);
-
-      return true;
+      return serverSocket;
     } catch (e) {
       Logger.error('Failed to establish WebSocket connection', e);
       final errorResponse =
           'HTTP/1.1 502 Bad Gateway\r\nContent-Length: ${e.toString().length}\r\n\r\n${e.toString()}';
       client.add(utf8.encode(errorResponse));
-      return false;
+      return null;
     }
   }
 

@@ -1,4 +1,6 @@
 import 'dart:io';
+import '../../flutter_ali_http_dns.dart';
+import '../../flutter_ali_http_dns_platform_interface.dart';
 import '../models/dns_config.dart';
 import '../utils/logger.dart';
 
@@ -7,12 +9,16 @@ class DnsResolver {
   DnsConfig? _config;
   final Map<String, String> _cache = {};
   final Map<String, DateTime> _cacheExpiry = {};
+  final Map<String, int> _retryCount = {};
+  static const int _maxRetries = 2;
+  static const Duration _retryDelay = Duration(milliseconds: 500);
 
   /// 初始化解析器
   Future<void> initialize(DnsConfig config) async {
     _config = config;
-    Logger.info('DnsResolver initialized with cache size: ${config.maxCacheSize}');
-    
+    Logger.info(
+        'DnsResolver initialized with cache size: ${config.maxCacheSize}');
+
     // 预加载域名
     if (config.preloadDomains.isNotEmpty) {
       Logger.info('Preloading domains: ${config.preloadDomains}');
@@ -23,7 +29,7 @@ class DnsResolver {
   }
 
   /// 解析域名
-  /// 
+  ///
   /// [domain] 要解析的域名
   /// 返回解析后的 IP 地址，如果解析失败则返回原域名
   Future<String> resolve(String domain) async {
@@ -40,26 +46,102 @@ class DnsResolver {
       }
     }
 
+    // 检查网络连接
+    if (!await _isNetworkAvailable()) {
+      Logger.warning('Network not available, returning original domain: $domain');
+      return domain;
+    }
+
+    // 尝试HTTPDNS解析，带重试机制
+    String? ip = await _resolveWithRetry(domain);
+    
+    if (ip != null && ip.isNotEmpty) {
+      // 缓存结果
+      if (_config!.enableCache) {
+        _cacheIp(domain, ip);
+      }
+      Logger.info('Domain resolved successfully via HTTPDNS: $domain -> $ip');
+      return ip;
+    }
+
+    // HTTPDNS失败，回退到系统DNS
+    Logger.warning(
+        'HTTPDNS resolution failed for $domain. Falling back to system DNS.');
+    return await resolveWithSystemDns(domain);
+  }
+
+  /// 带重试机制的HTTPDNS解析
+  Future<String?> _resolveWithRetry(String domain) async {
+    int retryCount = _retryCount[domain] ?? 0;
+    
+    for (int attempt = 0; attempt <= _maxRetries; attempt++) {
+      try {
+        Logger.debug('HTTPDNS resolution attempt ${attempt + 1} for domain: $domain');
+        
+        // 直接调用平台方法，避免循环调用
+        final String? ip = await FlutterAliHttpDnsPlatform.instance.resolveDomain(domain);
+
+        if (ip != null && ip.isNotEmpty) {
+          // 成功解析，重置重试计数
+          _retryCount.remove(domain);
+          return ip;
+        } else {
+          Logger.debug('HTTPDNS returned null or empty for $domain (attempt ${attempt + 1})');
+        }
+      } catch (e) {
+        Logger.error(
+            'HTTPDNS resolution error for $domain (attempt ${attempt + 1}): $e');
+      }
+
+      // 如果不是最后一次尝试，等待后重试
+      if (attempt < _maxRetries) {
+        await Future.delayed(_retryDelay);
+      }
+    }
+
+    // 所有重试都失败了
+    _retryCount[domain] = retryCount + 1;
+    Logger.warning('All HTTPDNS resolution attempts failed for domain: $domain');
+    return null;
+  }
+
+  /// 检查网络连接状态
+  Future<bool> _isNetworkAvailable() async {
+    try {
+      // 尝试连接到一个可靠的服务器来检查网络状态
+      final result = await InternetAddress.lookup('8.8.8.8')
+          .timeout(const Duration(seconds: 3));
+      return result.isNotEmpty;
+    } catch (e) {
+      Logger.debug('Network check failed: $e');
+      return false;
+    }
+  }
+
+  /// 使用系统DNS作为备选方案
+  Future<String> resolveWithSystemDns(String domain) async {
     try {
       Logger.debug('Resolving domain using system DNS: $domain');
-      // 使用系统 DNS 解析
-      final addresses = await InternetAddress.lookup(domain);
+      
+      // 使用超时机制
+      final addresses = await InternetAddress.lookup(domain)
+          .timeout(const Duration(seconds: 5));
+          
       if (addresses.isNotEmpty) {
         final ip = addresses.first.address;
-        
-        // 缓存结果
         if (_config!.enableCache) {
           _cacheIp(domain, ip);
         }
-        
-        Logger.info('Domain resolved successfully: $domain -> $ip');
+        Logger.info(
+            'Domain resolved successfully via system DNS: $domain -> $ip');
         return ip;
       }
     } catch (e) {
-      Logger.error('Failed to resolve domain $domain', e);
+      Logger.error('Failed to resolve domain $domain using system DNS', e);
     }
 
-    Logger.warning('Domain resolution failed, returning original domain: $domain');
+    Logger.warning(
+        'All DNS resolution failed, returning original domain: $domain');
     return domain;
   }
 
@@ -69,7 +151,7 @@ class DnsResolver {
     if (expiry != null && DateTime.now().isBefore(expiry)) {
       return _cache[domain];
     }
-    
+
     // 清理过期缓存
     _cache.remove(domain);
     _cacheExpiry.remove(domain);
@@ -100,6 +182,7 @@ class DnsResolver {
     final size = _cache.length;
     _cache.clear();
     _cacheExpiry.clear();
+    _retryCount.clear();
     Logger.info('Cache cleared, removed $size entries');
   }
 
@@ -109,6 +192,7 @@ class DnsResolver {
       'size': _cache.length,
       'maxSize': _config?.maxCacheSize ?? 0,
       'domains': _cache.keys.toList(),
+      'retryCount': _retryCount,
     };
   }
 }

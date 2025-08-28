@@ -168,29 +168,22 @@ public class FlutterAliHttpDnsPlugin: NSObject, FlutterPlugin {
             return
         }
         
-        // 如果在模拟器上运行，直接返回原域名
+        // 如果在模拟器上运行，使用系统 DNS 作为备选
         if isSimulator {
-            logDebug("Simulator mode: returning original domain \(domain)")
-            result(domain)
+            logDebug("Simulator mode: using system DNS for \(domain)")
+            // 在模拟器上，我们返回 null 让 Flutter 端使用系统 DNS
+            result(nil)
             return
         }
         
-        guard let _ = dnsResolver else {
+        guard let dnsResolver = dnsResolver else {
             result(FlutterError(code: "NOT_INITIALIZED", message: "DNS resolver not available", details: nil))
             return
         }
         
-        // 使用官方推荐的 getIpsByCacheWithDomain 方法
-        // andExpiredIPEnabled: YES 表示允许返回过期的 IP
-        // 暂时返回原域名，因为 Objective-C 运行时调用复杂
-        let ips: [String]? = nil
-        
-        if let ips = ips, !ips.isEmpty {
-            // 返回第一个 IP 地址
-            result(ips[0])
-        } else {
-            // 如果没有获取到 IP，返回原域名作为兜底
-            result(domain)
-        }
+        // 尝试使用 DNSResolver 进行解析
+        // 由于 Objective-C 运行时调用复杂，暂时返回 null 让 Flutter 端使用系统 DNS
+        logDebug("Attempting DNS resolution for \(domain)")
+        result(nil)
     }
 }

@@ -16,14 +16,12 @@ class Http2Handler {
   /// [clientSocket] 客户端Socket连接
   /// [serverPort] 服务器端口
   /// [dnsResolver] DNS解析器实例
-  /// [clientStream] 客户端数据流（可选，用于替代clientSocket）
   /// 返回处理是否成功
   static Future<bool> handleHttp2Connection(
     Socket clientSocket,
     int serverPort,
     DnsResolver dnsResolver, {
     List<int>? initialData,
-    Stream<List<int>>? clientStream,
   }) async {
     Logger.debug('Starting HTTP/2 connection handling for port: $serverPort');
     
@@ -32,13 +30,8 @@ class Http2Handler {
       // 创建服务器传输连接
       ServerTransportConnection? serverTransport;
       
-      if (clientStream != null) {
-        serverTransport = ServerTransportConnection.viaStreams(clientStream, clientSocket);
-        Logger.debug('Using provided clientStream for server transport');
-      } else {
-        serverTransport = ServerTransportConnection.viaSocket(clientSocket);
-        Logger.debug('Using direct Socket for server transport');
-      }
+      serverTransport = ServerTransportConnection.viaSocket(clientSocket);
+      Logger.debug('Using direct Socket for server transport');
       
       Logger.debug('HTTP/2 connection setup completed');
       return true;
