@@ -3,6 +3,7 @@ import 'package:flutter_ali_http_dns/src/models/proxy_config.dart';
 import 'package:flutter_ali_http_dns/src/services/dns_resolver.dart';
 import 'package:flutter_ali_http_dns/src/services/proxy_server.dart';
 import 'package:flutter_test/flutter_test.dart';
+import '../example/lib/credentials.dart' as credentials;
 
 void main() {
   // 确保Flutter环境已初始化，以便使用MethodChannel
@@ -11,9 +12,9 @@ void main() {
   group('DnsResolver Tests', () {
     late DnsResolver dnsResolver;
     final dnsConfig = DnsConfig(
-      accountId: 'test',
-      accessKeyId: 'test',
-      accessKeySecret: 'test',
+      accountId: credentials.AliHttpDnsCredentials.accountId,
+      accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+      accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       enableCache: true,
       maxCacheSize: 100,
       maxCacheTTL: 300,
@@ -111,14 +112,14 @@ void main() {
   group('Configuration Tests', () {
     test('should create valid DnsConfig', () {
       final config = DnsConfig(
-        accountId: 'test_account',
-        accessKeyId: 'test_key',
-        accessKeySecret: 'test_secret',
+        accountId: credentials.AliHttpDnsCredentials.accountId,
+        accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+        accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
         enableCache: true,
         maxCacheSize: 100,
       );
 
-      expect(config.accountId, equals('test_account'));
+      expect(config.accountId, equals(credentials.AliHttpDnsCredentials.accountId));
       expect(config.enableCache, isTrue);
       expect(config.maxCacheSize, equals(100));
     });

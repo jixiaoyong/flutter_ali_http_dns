@@ -3,6 +3,7 @@ import 'package:flutter_ali_http_dns/flutter_ali_http_dns.dart';
 import 'package:flutter_ali_http_dns/src/models/dns_config.dart';
 import 'package:flutter_ali_http_dns/src/models/proxy_config.dart';
 import 'package:flutter_ali_http_dns/src/utils/logger.dart';
+import '../example/lib/credentials.dart' as credentials;
 
 void main() {
   group('FlutterAliHttpDns Core Tests', () {
@@ -21,21 +22,21 @@ void main() {
     test('should create DnsConfig with default and custom values', () {
       // 测试默认配置
       final defaultConfig = DnsConfig(
-        accountId: 'test_account',
-        accessKeyId: 'test_key_id',
-        accessKeySecret: 'test_secret',
+        accountId: credentials.AliHttpDnsCredentials.accountId,
+        accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+        accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       );
 
-      expect(defaultConfig.accountId, equals('test_account'));
+      expect(defaultConfig.accountId, equals(credentials.AliHttpDnsCredentials.accountId));
       expect(defaultConfig.enableCache, isTrue);
       expect(defaultConfig.maxCacheSize, equals(100));
       expect(defaultConfig.preloadDomains, isEmpty);
 
       // 测试自定义配置
       final customConfig = DnsConfig(
-        accountId: 'test_account',
-        accessKeyId: 'test_key_id',
-        accessKeySecret: 'test_secret',
+        accountId: credentials.AliHttpDnsCredentials.accountId,
+        accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+        accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
         enableCache: false,
         maxCacheSize: 200,
         preloadDomains: ['www.example.com'],
@@ -69,16 +70,16 @@ void main() {
     test('should handle JSON serialization and deserialization', () {
       // 测试 DnsConfig JSON 序列化
       final dnsConfig = DnsConfig(
-        accountId: 'test_account',
-        accessKeyId: 'test_key_id',
-        accessKeySecret: 'test_secret',
+        accountId: credentials.AliHttpDnsCredentials.accountId,
+        accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+        accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
         enableCache: false,
         preloadDomains: ['www.example.com'],
       );
 
       final dnsJson = dnsConfig.toJson();
       final dnsConfigFromJson = DnsConfig.fromJson(dnsJson);
-      expect(dnsConfigFromJson.accountId, equals('test_account'));
+      expect(dnsConfigFromJson.accountId, equals(credentials.AliHttpDnsCredentials.accountId));
       expect(dnsConfigFromJson.enableCache, isFalse);
 
       // 测试 ProxyConfig JSON 序列化
@@ -96,15 +97,15 @@ void main() {
 
     test('should handle config equality', () {
       final config1 = DnsConfig(
-        accountId: 'test_account',
-        accessKeyId: 'test_key_id',
-        accessKeySecret: 'test_secret',
+        accountId: credentials.AliHttpDnsCredentials.accountId,
+        accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+        accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       );
       
       final config2 = DnsConfig(
-        accountId: 'test_account',
-        accessKeyId: 'test_key_id',
-        accessKeySecret: 'test_secret',
+        accountId: credentials.AliHttpDnsCredentials.accountId,
+        accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
+        accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       );
 
       expect(config1, equals(config2));

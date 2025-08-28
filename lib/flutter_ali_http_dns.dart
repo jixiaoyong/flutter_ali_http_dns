@@ -88,13 +88,13 @@ class FlutterAliHttpDns {
   Future<String?> resolveDomainNullable(String domain,
       {bool enableSystemDnsFallback = true}) async {
     if (!_isInitialized) {
-      throw StateError('DNS service not initialized. Call initialize() first.');
+      Logger.error('DNS service not initialized. Call initialize() first.');
+      return null;
     }
 
     try {
       Logger.debug(
           'Resolving domain (nullable): $domain (system fallback: $enableSystemDnsFallback)');
-      // 统一使用 DnsResolver 进行解析
       return await _dnsResolver.resolve(domain,
           enableSystemDnsFallback: enableSystemDnsFallback);
     } catch (e) {
@@ -121,7 +121,14 @@ class FlutterAliHttpDns {
   /// 返回启动是否成功
   Future<bool> startProxy({ProxyConfig config = const ProxyConfig()}) async {
     if (!_isInitialized) {
-      throw StateError('DNS service not initialized. Call initialize() first.');
+      Logger.error('DNS service not initialized. Call initialize() first.');
+      return false;
+    }
+
+    // 验证端口配置
+    if (!_validateProxyConfig(config)) {
+      Logger.error('Proxy configuration validation failed');
+      return false;
     }
 
     // 如果代理已经在运行，直接返回成功
@@ -170,7 +177,11 @@ class FlutterAliHttpDns {
       }
 
       // 启动默认代理服务器（用于Dio等普通场景）
-      _proxyServer = await ProxyServer.startDefault(config, _dnsResolver);
+      _proxyServer = await ProxyServer.start(config, _dnsResolver);
+      if (_proxyServer == null) {
+        Logger.error('Failed to start default proxy server');
+        return false;
+      }
       _isProxyRunning = true;
 
       final address = _proxyServer!.getAddress();
@@ -282,6 +293,32 @@ class FlutterAliHttpDns {
     return await PortUtils.isPortAvailable(port);
   }
 
+  /// 注册端口监听（动态添加端口）
+  ///
+  /// [port] 要监听的端口
+  /// 返回注册是否成功
+  Future<bool> registerPort(int port) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      Logger.error('Proxy server not running. Call startProxy() first.');
+      return false;
+    }
+
+    return await _proxyServer!.registerPort(port);
+  }
+
+  /// 取消注册端口监听（动态移除端口）
+  ///
+  /// [port] 要取消监听的端口
+  /// 返回取消注册是否成功
+  Future<bool> deregisterPort(int port) async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      Logger.error('Proxy server not running. Call startProxy() first.');
+      return false;
+    }
+
+    return await _proxyServer!.deregisterPort(port);
+  }
+
   /// 获取代理配置字符串
   ///
   /// 返回用于 HttpClient 配置的代理字符串
@@ -311,15 +348,26 @@ class FlutterAliHttpDns {
   ///
   /// [client] HttpClient 实例
   /// 配置 HttpClient 使用插件提供的代理
-  Future<void> configureHttpClient(HttpClient client) async {
+  /// 返回配置是否成功
+  Future<bool> configureHttpClient(HttpClient client) async {
     if (!_isProxyRunning) {
-      throw StateError('Proxy server not running. Call startProxy() first.');
+      Logger.error('Proxy server not running. Call startProxy() first.');
+      return false;
     }
 
-    final proxyConfig = await getProxyConfigString();
-    if (proxyConfig != null) {
-      client.findProxy = (uri) => proxyConfig;
-      Logger.info('HttpClient configured with proxy: $proxyConfig');
+    try {
+      final proxyConfig = await getProxyConfigString();
+      if (proxyConfig != null) {
+        client.findProxy = (uri) => proxyConfig;
+        Logger.info('HttpClient configured with proxy: $proxyConfig');
+        return true;
+      } else {
+        Logger.warning('No proxy configuration available');
+        return false;
+      }
+    } catch (e) {
+      Logger.error('Failed to configure HttpClient with proxy', e);
+      return false;
     }
   }
 
@@ -355,6 +403,47 @@ class FlutterAliHttpDns {
     await _proxyServer?.dispose();
     _isInitialized = false;
     Logger.info('Plugin resources disposed');
+  }
+
+  /// 验证代理配置中的端口设置
+  ///
+  /// [config] 代理配置
+  /// 返回验证是否成功
+  bool _validateProxyConfig(ProxyConfig config) {
+    Logger.info('Validating proxy configuration...');
+
+    try {
+      // 验证端口池中的每个端口
+      if (config.portPool != null && config.portPool!.isNotEmpty) {
+        Logger.info('Validating port pool: ${config.portPool}');
+        for (final port in config.portPool!) {
+          if (!PortUtils.isValidPort(port)) {
+            Logger.error(
+                'Invalid port in port pool: $port (must be between 1 and 65535)');
+            return false;
+          }
+        }
+        Logger.info('Port pool validation passed');
+      }
+
+      // 验证端口范围
+      final startPort = config.startPort ?? 4041;
+      final endPort = config.endPort ?? (startPort + 100);
+
+      Logger.info('Validating port range: $startPort-$endPort');
+      if (!PortUtils.isValidPortRange(startPort, endPort)) {
+        Logger.error(
+            'Invalid port range: startPort ($startPort) and endPort ($endPort) must be valid and endPort must be greater than startPort');
+        return false;
+      }
+      Logger.info('Port range validation passed');
+
+      Logger.info('Proxy configuration validation completed successfully');
+      return true;
+    } catch (e) {
+      Logger.error('Error during proxy configuration validation', e);
+      return false;
+    }
   }
 
   /// 清理残留端口

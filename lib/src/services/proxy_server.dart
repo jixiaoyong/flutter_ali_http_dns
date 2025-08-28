@@ -13,9 +13,6 @@ import '../services/dns_resolver.dart';
 
 /// 支持 HTTPDNS 的代理服务器
 /// - 兼容 Dio（原域名+原端口）
-/// - 兼容 Nakama（127.0.0.1/localhost + 动态域名映射）
-/// - 支持动态端口分配和映射管理
-/// - 默认监听单个端口，支持动态添加端口
 /// - 支持HTTP/2协议（使用http2库）
 class ProxyServer {
   ProxyConfig config;
@@ -26,7 +23,6 @@ class ProxyServer {
   // DNS解析器
   final DnsResolver _dnsResolver;
 
-  // 单例模式：确保同一个app中只有一个实例
   static ProxyServer? _instance;
   static final Map<int, ProxyServer> _instancesByPort = {};
 
@@ -38,7 +34,7 @@ class ProxyServer {
   /// [config] 代理配置
   /// [dnsResolver] DNS解析器实例
   /// 返回启动的代理服务器实例
-  static Future<ProxyServer> startDefault(
+  static Future<ProxyServer?> start(
       ProxyConfig config, DnsResolver dnsResolver) async {
     Logger.info('Starting default proxy server on single port');
 
@@ -46,7 +42,11 @@ class ProxyServer {
     final server = ProxyServer(config: config, dnsResolver: dnsResolver);
 
     // 启动默认代理（监听一个可用端口）
-    await server._startDefault();
+    final success = await server._startDefault();
+    if (!success) {
+      Logger.error('Failed to start default proxy server');
+      return null;
+    }
 
     // 注册单例实例
     _instance = server;
@@ -55,12 +55,16 @@ class ProxyServer {
   }
 
   /// 内部启动默认代理方法
-  Future<void> _startDefault() async {
+  Future<bool> _startDefault() async {
     try {
       Logger.info('Starting default proxy server on single port');
 
       // 分配一个默认端口
       final port = await _allocateDefaultPort();
+      if (port == null) {
+        Logger.error('Failed to allocate default port');
+        return false;
+      }
       _allocatedPorts = [port];
 
       // 创建服务器socket并开始监听
@@ -69,14 +73,15 @@ class ProxyServer {
       _isRunning = true;
       Logger.info(
           'Default proxy server started on port $port (with HTTP/2 support)');
+      return true;
     } catch (e) {
       Logger.error('Failed to start default proxy server', e);
-      rethrow;
+      return false;
     }
   }
 
   /// 分配默认端口
-  Future<int> _allocateDefaultPort() async {
+  Future<int?> _allocateDefaultPort() async {
     // 优先使用配置中的端口池
     if (config.portPool != null && config.portPool!.isNotEmpty) {
       for (final port in config.portPool!) {
@@ -90,38 +95,12 @@ class ProxyServer {
     final startPort = config.startPort ?? 4041;
     final endPort = config.endPort ?? (startPort + 100);
 
-    // 验证端口范围
-    if (endPort <= startPort) {
-      throw Exception(
-          'endPort ($endPort) must be greater than startPort ($startPort)');
-    }
-
     // 使用工具类查找可用端口
     return await PortUtils.findAvailablePort(
       startPort: startPort,
       endPort: endPort,
       maxAttempts: 100,
     );
-  }
-
-  /// 启动代理服务器
-  Future<void> start() async {
-    if (_isRunning) {
-      await stop();
-    }
-
-    try {
-      // 为每个端口创建服务器套接字
-      for (final port in _allocatedPorts) {
-        await _createServerSocket(port);
-      }
-
-      _isRunning = true;
-      Logger.info('HTTPDNS Smart Proxy started on ports: $_allocatedPorts');
-    } catch (e) {
-      Logger.error('Failed to start proxy server', e);
-      rethrow;
-    }
   }
 
   /// 创建服务器套接字
@@ -230,8 +209,6 @@ class ProxyServer {
   /// 获取当前分配的端口列表
   List<int> get allocatedPorts => List.unmodifiable(_allocatedPorts);
 
-
-
   /// 注册端口监听（动态添加端口）
   ///
   /// [port] 要监听的端口
@@ -239,6 +216,12 @@ class ProxyServer {
   Future<bool> registerPort(int port) async {
     try {
       Logger.info('Registering port $port for listening');
+
+      // 验证端口号是否有效
+      if (!PortUtils.isValidPort(port)) {
+        Logger.error('Port $port is not valid (must be between 1 and 65535)');
+        return false;
+      }
 
       // 检查端口是否已经在监听
       if (_allocatedPorts.contains(port)) {
@@ -274,6 +257,12 @@ class ProxyServer {
   Future<bool> deregisterPort(int port) async {
     try {
       Logger.info('Deregistering port $port from listening');
+
+      // 验证端口号是否有效
+      if (!PortUtils.isValidPort(port)) {
+        Logger.error('Port $port is not valid (must be between 1 and 65535)');
+        return false;
+      }
 
       // 检查端口是否在监听列表中
       if (!_allocatedPorts.contains(port)) {
@@ -328,6 +317,11 @@ class ProxyServer {
   /// [port] 要检查的端口
   /// 返回端口是否正在被监听
   bool isPortListening(int port) {
+    // 验证端口号是否有效
+    if (!PortUtils.isValidPort(port)) {
+      Logger.warning('Port $port is not valid (must be between 1 and 65535)');
+      return false;
+    }
     return _allocatedPorts.contains(port);
   }
 }
@@ -377,8 +371,7 @@ class _ClientHandler {
                   _isHttp2 = true;
                   await clientSubscription?.cancel();
                   // 传递client作为数据源
-                  await _handleHttp2InternalForward(
-                      requestString, [], client);
+                  await _handleHttp2InternalForward(requestString, [], client);
                   return;
                 }
                 break;
@@ -387,28 +380,30 @@ class _ClientHandler {
                 if (!_isWebSocket) {
                   // 避免重复处理
                   _isWebSocket = true;
-                  final serverSocket = await Http1Handler.handleWebSocketRequest(
-                      client,
-                      requestString,
-                      proxyServer._dnsResolver,
-                      proxyServer);
+                  final serverSocket =
+                      await Http1Handler.handleWebSocketRequest(client,
+                          requestString, proxyServer._dnsResolver, proxyServer);
                   if (serverSocket == null) {
                     throw Exception('Failed to handle WebSocket request');
                   }
-                  
+
                   // 设置服务器连接
                   server = serverSocket;
-                  
+
                   // 设置服务器端数据监听（用于WebSocket双向转发）
                   if (server != null) {
                     serverSubscription = server!.listen(
                       (data) {
                         try {
-                          Logger.debug('Server -> Client (WebSocket): ${data.length} bytes');
+                          Logger.debug(
+                              'Server -> Client (WebSocket): ${data.length} bytes');
                           client.add(data);
-                          _logDataForwarding('Server -> Client', data.length, data.length);
+                          _logDataForwarding(
+                              'Server -> Client', data.length, data.length);
                         } catch (e) {
-                          Logger.error('Client socket error during server->client forwarding', e);
+                          Logger.error(
+                              'Client socket error during server->client forwarding',
+                              e);
                           close();
                         }
                       },
@@ -433,28 +428,33 @@ class _ClientHandler {
                   final connectMatch = RegExp(r'CONNECT ([^ :]+):(\d+)')
                       .firstMatch(requestString);
                   if (connectMatch != null) {
-                    final serverSocket = await Http1Handler.handleConnectRequest(
-                        client,
-                        connectMatch,
-                        proxyServer._dnsResolver,
-                        proxyServer);
+                    final serverSocket =
+                        await Http1Handler.handleConnectRequest(
+                            client,
+                            connectMatch,
+                            proxyServer._dnsResolver,
+                            proxyServer);
                     if (serverSocket == null) {
                       throw Exception('Failed to handle HTTPS CONNECT request');
                     }
-                    
+
                     // 设置服务器连接
                     server = serverSocket;
-                    
+
                     // 设置服务器端数据监听（用于HTTPS双向转发）
                     if (server != null) {
                       serverSubscription = server!.listen(
                         (data) {
                           try {
-                            Logger.debug('Server -> Client (HTTPS): ${data.length} bytes');
+                            Logger.debug(
+                                'Server -> Client (HTTPS): ${data.length} bytes');
                             client.add(data);
-                            _logDataForwarding('Server -> Client', data.length, data.length);
+                            _logDataForwarding(
+                                'Server -> Client', data.length, data.length);
                           } catch (e) {
-                            Logger.error('Client socket error during server->client forwarding', e);
+                            Logger.error(
+                                'Client socket error during server->client forwarding',
+                                e);
                             close();
                           }
                         },
@@ -488,20 +488,24 @@ class _ClientHandler {
                     if (serverSocket == null) {
                       throw Exception('Failed to handle HTTP request');
                     }
-                    
+
                     // 设置服务器连接
                     server = serverSocket;
-                    
+
                     // 设置服务器端数据监听（用于HTTP双向转发）
                     if (server != null) {
                       serverSubscription = server!.listen(
                         (data) {
                           try {
-                            Logger.debug('Server -> Client (HTTP): ${data.length} bytes');
+                            Logger.debug(
+                                'Server -> Client (HTTP): ${data.length} bytes');
                             client.add(data);
-                            _logDataForwarding('Server -> Client', data.length, data.length);
+                            _logDataForwarding(
+                                'Server -> Client', data.length, data.length);
                           } catch (e) {
-                            Logger.error('Client socket error during server->client forwarding', e);
+                            Logger.error(
+                                'Client socket error during server->client forwarding',
+                                e);
                             close();
                           }
                         },
@@ -600,8 +604,8 @@ class _ClientHandler {
   }
 
   /// 处理HTTP/2请求 - 使用Http2Handler工具类
-  Future<void> _handleHttp2InternalForward(String requestString,
-      List<int> initialData, Socket clientSocket) async {
+  Future<void> _handleHttp2InternalForward(
+      String requestString, List<int> initialData, Socket clientSocket) async {
     Logger.debug('HTTP/2 internal forward: ${requestString.split('\n').first}');
 
     // 记录HTTP/2请求开始时的详细信息
@@ -685,15 +689,11 @@ class _ClientHandler {
       Logger.info('  - Allocated ports: ${proxyServer._allocatedPorts}');
       Logger.info('  - Is running: ${proxyServer._isRunning}');
 
-
-
       Logger.info('=== End HTTP/2 Request Start ===');
     } catch (e) {
       Logger.error('Failed to log HTTP/2 request start details: $e');
     }
   }
-
-
 
   /// 验证HTTP/2连接是否真正建立
   Future<void> _verifyHttp2Connection() async {
@@ -909,8 +909,6 @@ class _ClientHandler {
       Logger.error('  - Allocated ports: ${proxyServer._allocatedPorts}');
       Logger.error('  - Is running: ${proxyServer._isRunning}');
 
-
-
       // 缓冲区信息
       Logger.error('Buffer info:');
       Logger.error('  - Buffer size: ${buffer.length} bytes');
@@ -1010,11 +1008,11 @@ Connection Details:
   void close() {
     try {
       Logger.debug('Closing connection');
-      
+
       // 取消订阅
       clientSubscription?.cancel();
       serverSubscription?.cancel();
-      
+
       // 关闭连接
       client.destroy();
       server?.destroy();
