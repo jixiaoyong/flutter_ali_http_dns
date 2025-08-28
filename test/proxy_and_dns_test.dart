@@ -1,13 +1,8 @@
-import 'dart:async';
-import 'dart:io';
-
-import 'package:flutter/services.dart';
 import 'package:flutter_ali_http_dns/src/models/dns_config.dart';
 import 'package:flutter_ali_http_dns/src/models/proxy_config.dart';
 import 'package:flutter_ali_http_dns/src/services/dns_resolver.dart';
 import 'package:flutter_ali_http_dns/src/services/proxy_server.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_ali_http_dns/src/utils/logger.dart';
 
 void main() {
   // 确保Flutter环境已初始化，以便使用MethodChannel
@@ -51,14 +46,14 @@ void main() {
     test('should clear cache properly', () async {
       // 先解析一个域名
       await dnsResolver.resolveWithSystemDns('example.com');
-      
+
       // 检查缓存统计
       final stats = dnsResolver.getCacheStats();
       expect(stats['size'], greaterThan(0));
-      
+
       // 清理缓存
       dnsResolver.clearCache();
-      
+
       // 再次检查缓存统计
       final newStats = dnsResolver.getCacheStats();
       expect(newStats['size'], 0);
@@ -67,7 +62,8 @@ void main() {
     test('should handle network unavailability gracefully', () async {
       // 测试网络不可用的情况
       // 这里我们通过解析一个不存在的域名来模拟网络问题
-      final ip = await dnsResolver.resolve('invalid-domain-that-does-not-exist-12345.com');
+      final ip = await dnsResolver
+          .resolve('invalid-domain-that-does-not-exist-12345.com');
       // 由于系统DNS可能会返回一个IP（比如NXDOMAIN被重定向），我们只验证返回的不是原始域名
       expect(ip, isNotEmpty);
       expect(ip != 'invalid-domain-that-does-not-exist-12345.com', isTrue);
@@ -82,7 +78,7 @@ void main() {
         config: config,
         dnsResolver: dnsResolver,
       );
-      
+
       expect(proxyServer, isNotNull);
       expect(proxyServer.config, equals(config));
     });
@@ -94,7 +90,7 @@ void main() {
         config: config,
         dnsResolver: dnsResolver,
       );
-      
+
       final ports = proxyServer.getListeningPorts();
       expect(ports, isEmpty); // 未启动时应该为空
     });
@@ -106,7 +102,7 @@ void main() {
         config: config,
         dnsResolver: dnsResolver,
       );
-      
+
       final isListening = proxyServer.isPortListening(4041);
       expect(isListening, isFalse); // 未启动时应该为false
     });

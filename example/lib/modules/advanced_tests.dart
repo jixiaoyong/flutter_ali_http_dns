@@ -32,13 +32,13 @@ class AdvancedTests {
       // 1. 日志控制测试
       onLogMessage('1. Testing log control...');
       totalTests++;
-      
+
       try {
         // 设置日志级别
         FlutterAliHttpDns.setLogLevel(LogLevel.info);
         FlutterAliHttpDns.setLogEnabled(true);
         onLogMessage('   Log level set to INFO, logging enabled');
-        
+
         final result = '✅ 日志控制测试\n'
             '   日志级别: INFO\n'
             '   日志启用: 是\n'
@@ -55,13 +55,13 @@ class AdvancedTests {
       // 2. 端口可用性检查
       onLogMessage('2. Testing port availability...');
       totalTests++;
-      
+
       try {
         final port4041Available = await _dnsService.isPortAvailable(4041);
         final port9999Available = await _dnsService.isPortAvailable(9999);
         onLogMessage('   Port 4041 available: $port4041Available');
         onLogMessage('   Port 9999 available: $port9999Available');
-        
+
         final result = '✅ 端口可用性检查\n'
             '   端口 4041: ${port4041Available ? '可用' : '被占用'}\n'
             '   端口 9999: ${port9999Available ? '可用' : '被占用'}\n'
@@ -78,11 +78,11 @@ class AdvancedTests {
       // 3. 代理配置字符串
       onLogMessage('3. Testing proxy config string...');
       totalTests++;
-      
+
       try {
         final proxyConfigString = await _dnsService.getProxyConfigString();
         onLogMessage('   Proxy config string: $proxyConfigString');
-        
+
         final result = '✅ 代理配置字符串\n'
             '   配置: $proxyConfigString\n'
             '   状态: 获取成功';
@@ -98,7 +98,7 @@ class AdvancedTests {
       // 4. 代理配置测试
       onLogMessage('4. Testing proxy configuration...');
       totalTests++;
-      
+
       if (isProxyRunning) {
         try {
           // 获取代理配置
@@ -106,12 +106,12 @@ class AdvancedTests {
           final http2Address = await _dnsService.getHttp2ProxyAddress();
           final allAddresses = await _dnsService.getAllProxyAddresses();
           final dioConfig = await _dnsService.getDioProxyConfig();
-          
+
           onLogMessage('   Proxy address: $proxyAddress');
           onLogMessage('   HTTP/2 address: $http2Address');
           onLogMessage('   All addresses: ${allAddresses.join(', ')}');
           onLogMessage('   Dio config: $dioConfig');
-          
+
           final result = '✅ 代理配置测试\n'
               '   代理地址: $proxyAddress\n'
               '   HTTP/2地址: $http2Address\n'
@@ -136,21 +136,18 @@ class AdvancedTests {
       // 5. 端口管理测试
       onLogMessage('5. Testing port management...');
       totalTests++;
-      
+
       if (isProxyRunning) {
         try {
           final actualPorts = await _dnsService.getActualPorts();
           final mainPort = await _dnsService.getMainPort();
-          final availablePorts = await _dnsService.getAvailablePorts();
-          
+
           onLogMessage('   Actual ports: ${actualPorts.join(', ')}');
           onLogMessage('   Main port: $mainPort');
-          onLogMessage('   Available ports: ${availablePorts.join(', ')}');
-          
+
           final result = '✅ 端口管理测试\n'
               '   实际端口: ${actualPorts.join(', ')}\n'
               '   主端口: $mainPort\n'
-              '   可用端口: ${availablePorts.join(', ')}\n'
               '   状态: 管理正常';
           results.add(result);
           successCount++;
@@ -167,59 +164,35 @@ class AdvancedTests {
         results.add(result);
       }
 
-      // 6. 进程信息测试
-      onLogMessage('6. Testing process information...');
+      // 7. 代理状态检查测试
+      onLogMessage('7. Testing proxy status check...');
       totalTests++;
-      
-      try {
-        final currentPid = FlutterAliHttpDns.getCurrentProcessId();
-        onLogMessage('   Current process ID: $currentPid');
-        
-        final result = '✅ 进程信息测试\n'
-            '   当前进程ID: $currentPid\n'
-            '   状态: 获取成功';
-        results.add(result);
-        successCount++;
-      } catch (e) {
-        final result = '❌ 进程信息测试\n'
-            '   错误: $e\n'
-            '   状态: 获取失败';
-        results.add(result);
-      }
 
-      // 7. 端口信息测试
-      onLogMessage('7. Testing port information...');
-      totalTests++;
-      
       try {
-        final port4041Info = await FlutterAliHttpDns.getPortInfo(4041);
-        onLogMessage('   Port 4041 info: ${port4041Info.toString()}');
+        final proxyStatus = await _dnsService.checkProxyStatus();
+        onLogMessage('   Proxy status: $proxyStatus');
 
-        final isOwnApp = await FlutterAliHttpDns.isPortUsedByOwnApp(4041);
-        onLogMessage('   Port 4041 used by own app: $isOwnApp');
-        
-        final result = '✅ 端口信息测试\n'
-            '   端口4041信息: ${port4041Info.toString()}\n'
-            '   是否被本应用占用: $isOwnApp\n'
+        final result = '✅ 代理状态检查测试\n'
+            '   代理状态: $proxyStatus\n'
             '   状态: 检查完成';
         results.add(result);
         successCount++;
       } catch (e) {
-        final result = '❌ 端口信息测试\n'
+        final result = '❌ 代理状态检查测试\n'
             '   错误: $e\n'
             '   状态: 检查失败';
         results.add(result);
       }
 
       final successRate = (successCount / totalTests * 100).toStringAsFixed(1);
-      final summary = '高级功能测试统计: $successCount/$totalTests 成功 (${successRate}%)';
-      
+      final summary =
+          '高级功能测试统计: $successCount/$totalTests 成功 (${successRate}%)';
+
       final detailedResult = '$summary\n\n${results.join('\n\n')}';
-      
+
       onResultUpdate(detailedResult);
       onLogMessage('Advanced features test completed successfully');
       onSnackBarMessage('高级功能测试完成: $successCount/$totalTests 成功');
-
     } catch (e) {
       onLogMessage('Advanced features test failed: $e');
       onResultUpdate('高级功能测试失败: $e');
@@ -240,7 +213,7 @@ class AdvancedTests {
       // 1. DNS解析性能测试
       onLogMessage('1. Testing DNS resolution performance...');
       totalTests++;
-      
+
       try {
         final testDomains = [
           'www.google.com',
@@ -259,14 +232,16 @@ class AdvancedTests {
             final domainStopwatch = Stopwatch()..start();
             final resolvedIp = await _dnsService.resolveDomain(domain);
             domainStopwatch.stop();
-            
+
             if (resolvedIp != domain) {
               domainSuccessCount++;
-              final result = '   ✅ $domain -> $resolvedIp (${domainStopwatch.elapsedMilliseconds}ms)';
+              final result =
+                  '   ✅ $domain -> $resolvedIp (${domainStopwatch.elapsedMilliseconds}ms)';
               onLogMessage(result);
               domainResults.add(result);
             } else {
-              final result = '   ❌ $domain -> 解析失败 (${domainStopwatch.elapsedMilliseconds}ms)';
+              final result =
+                  '   ❌ $domain -> 解析失败 (${domainStopwatch.elapsedMilliseconds}ms)';
               onLogMessage(result);
               domainResults.add(result);
             }
@@ -279,8 +254,10 @@ class AdvancedTests {
 
         stopwatch.stop();
         final totalDuration = stopwatch.elapsedMilliseconds;
-        final domainSuccessRate = (domainSuccessCount / testDomains.length * 100).toStringAsFixed(1);
-        final averageTime = (totalDuration / testDomains.length).toStringAsFixed(1);
+        final domainSuccessRate =
+            (domainSuccessCount / testDomains.length * 100).toStringAsFixed(1);
+        final averageTime =
+            (totalDuration / testDomains.length).toStringAsFixed(1);
 
         onLogMessage('   DNS resolution performance:');
         onLogMessage('     Total domains: ${testDomains.length}');
@@ -308,7 +285,7 @@ class AdvancedTests {
       // 2. 代理连接性能测试
       onLogMessage('2. Testing proxy connection performance...');
       totalTests++;
-      
+
       if (isProxyRunning) {
         try {
           final proxyAddress = await _dnsService.getProxyAddress();
@@ -317,7 +294,7 @@ class AdvancedTests {
             if (parts.length == 2) {
               final host = parts[0];
               final port = int.tryParse(parts[1]);
-              
+
               if (port != null) {
                 final connectionStopwatch = Stopwatch()..start();
                 int connectionSuccessCount = 0;
@@ -331,7 +308,8 @@ class AdvancedTests {
                     singleConnectionStopwatch.stop();
                     socket.destroy();
                     connectionSuccessCount++;
-                    final result = '   ✅ 连接 $i: 成功 (${singleConnectionStopwatch.elapsedMilliseconds}ms)';
+                    final result =
+                        '   ✅ 连接 $i: 成功 (${singleConnectionStopwatch.elapsedMilliseconds}ms)';
                     onLogMessage(result);
                     connectionResults.add(result);
                   } catch (e) {
@@ -342,9 +320,13 @@ class AdvancedTests {
                 }
 
                 connectionStopwatch.stop();
-                final connectionDuration = connectionStopwatch.elapsedMilliseconds;
-                final connectionSuccessRate = (connectionSuccessCount / connectionCount * 100).toStringAsFixed(1);
-                final connectionAverageTime = (connectionDuration / connectionCount).toStringAsFixed(1);
+                final connectionDuration =
+                    connectionStopwatch.elapsedMilliseconds;
+                final connectionSuccessRate =
+                    (connectionSuccessCount / connectionCount * 100)
+                        .toStringAsFixed(1);
+                final connectionAverageTime =
+                    (connectionDuration / connectionCount).toStringAsFixed(1);
 
                 onLogMessage('   Proxy connection performance:');
                 onLogMessage('     Total connections: $connectionCount');
@@ -396,13 +378,12 @@ class AdvancedTests {
 
       final successRate = (successCount / totalTests * 100).toStringAsFixed(1);
       final summary = '性能测试统计: $successCount/$totalTests 成功 (${successRate}%)';
-      
+
       final detailedResult = '$summary\n\n${results.join('\n\n')}';
-      
+
       onResultUpdate(detailedResult);
       onLogMessage('Performance test completed successfully');
       onSnackBarMessage('性能测试完成: $successCount/$totalTests 成功');
-
     } catch (e) {
       onLogMessage('Performance test failed: $e');
       onResultUpdate('性能测试失败: $e');
@@ -423,7 +404,7 @@ class AdvancedTests {
       // 1. 无效域名测试
       onLogMessage('1. Testing invalid domain resolution...');
       totalTests++;
-      
+
       try {
         final invalidDomains = [
           'invalid.domain.test',
@@ -455,7 +436,9 @@ class AdvancedTests {
           }
         }
 
-        final domainSuccessRate = (domainSuccessCount / invalidDomains.length * 100).toStringAsFixed(1);
+        final domainSuccessRate =
+            (domainSuccessCount / invalidDomains.length * 100)
+                .toStringAsFixed(1);
         final result = '✅ 无效域名测试\n'
             '   测试域名数量: ${invalidDomains.length}\n'
             '   正确处理: $domainSuccessCount\n'
@@ -473,11 +456,11 @@ class AdvancedTests {
       // 2. 代理状态检查
       onLogMessage('2. Testing proxy status check...');
       totalTests++;
-      
+
       try {
         final proxyStatus = await _dnsService.checkProxyStatus();
         onLogMessage('   Proxy status: $proxyStatus');
-        
+
         final result = '✅ 代理状态检查\n'
             '   代理状态: $proxyStatus\n'
             '   状态: 检查成功';
@@ -493,7 +476,7 @@ class AdvancedTests {
       // 3. 端口检查
       onLogMessage('3. Testing port checks...');
       totalTests++;
-      
+
       try {
         final invalidPorts = [-1, 0, 65536, 99999];
         final portResults = <String>[];
@@ -522,7 +505,8 @@ class AdvancedTests {
           }
         }
 
-        final portSuccessRate = (portSuccessCount / invalidPorts.length * 100).toStringAsFixed(1);
+        final portSuccessRate =
+            (portSuccessCount / invalidPorts.length * 100).toStringAsFixed(1);
         final result = '✅ 端口检查测试\n'
             '   测试端口数量: ${invalidPorts.length}\n'
             '   正确处理: $portSuccessCount\n'
@@ -540,7 +524,7 @@ class AdvancedTests {
       // 4. 边界值测试
       onLogMessage('4. Testing boundary values...');
       totalTests++;
-      
+
       try {
         final boundaryResults = <String>[];
         int boundarySuccessCount = 0;
@@ -567,7 +551,8 @@ class AdvancedTests {
 
         // 测试特殊字符
         try {
-          final specialResult = await _dnsService.resolveDomain('test@#\$%^&*()');
+          final specialResult =
+              await _dnsService.resolveDomain('test@#\$%^&*()');
           if (specialResult == 'test@#\$%^&*()') {
             boundarySuccessCount++;
             final result = '   ✅ 特殊字符域名: 正确返回原域名';
@@ -585,7 +570,8 @@ class AdvancedTests {
           boundaryResults.add(result);
         }
 
-        final boundarySuccessRate = (boundarySuccessCount / 2 * 100).toStringAsFixed(1);
+        final boundarySuccessRate =
+            (boundarySuccessCount / 2 * 100).toStringAsFixed(1);
         final result = '✅ 边界值测试\n'
             '   测试项目: 2\n'
             '   正确处理: $boundarySuccessCount\n'
@@ -603,7 +589,7 @@ class AdvancedTests {
       // 5. 网络异常模拟测试
       onLogMessage('5. Testing network exception simulation...');
       totalTests++;
-      
+
       try {
         final networkResults = <String>[];
         int networkSuccessCount = 0;
@@ -649,7 +635,8 @@ class AdvancedTests {
           networkResults.add(result);
         }
 
-        final networkSuccessRate = (networkSuccessCount / 2 * 100).toStringAsFixed(1);
+        final networkSuccessRate =
+            (networkSuccessCount / 2 * 100).toStringAsFixed(1);
         final result = '✅ 网络异常模拟测试\n'
             '   测试项目: 2\n'
             '   正确处理: $networkSuccessCount\n'
@@ -665,14 +652,14 @@ class AdvancedTests {
       }
 
       final successRate = (successCount / totalTests * 100).toStringAsFixed(1);
-      final summary = '错误处理测试统计: $successCount/$totalTests 成功 (${successRate}%)';
-      
+      final summary =
+          '错误处理测试统计: $successCount/$totalTests 成功 (${successRate}%)';
+
       final detailedResult = '$summary\n\n${results.join('\n\n')}';
-      
+
       onResultUpdate(detailedResult);
       onLogMessage('Error handling test completed successfully');
       onSnackBarMessage('错误处理测试完成: $successCount/$totalTests 成功');
-
     } catch (e) {
       final errorMessage = '❌ 错误处理测试失败\n'
           '   错误: $e\n'

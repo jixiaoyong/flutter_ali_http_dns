@@ -1,6 +1,8 @@
 # Flutter Ali HTTP DNS
 
-一个基于[阿里云HTTPDNS](https://help.aliyun.com/zh/dns/httpdns-what-is-mobile-resolution-httpdns)的Flutter插件，提供智能域名解析和代理功能，支持HTTP/1.1和HTTP/2协议。
+一个基于[阿里云 HTTPDNS](https://help.aliyun.com/zh/dns/httpdns-what-is-mobile-resolution-httpdns)的 Flutter 插件，提供智能域名解析和代理功能，支持 HTTP/1.1 和 HTTP/2 协议。
+
+支持平台： Android、iOS
 
 支持解析域名对应的 IP,也支持代理网络请求并解析域名。
 
@@ -78,46 +80,53 @@
 <summary><strong>📋 详细流程说明（点击展开）</strong></summary>
 
 ### 1. **应用层请求**
-- Flutter应用中的各种HTTP客户端（Dio、HttpClient、WebSocket等）发起网络请求
+
+- Flutter 应用中的各种 HTTP 客户端（Dio、HttpClient、WebSocket 等）发起网络请求
 - 请求被配置为通过本地代理服务器（localhost:4041）
 
 ### 2. **代理服务器处理**
-- **请求解析器**：解析HTTP/HTTPS/WebSocket请求，提取目标域名和端口
-- **协议检测器**：自动识别请求协议类型（HTTP/1.1、HTTP/2、HTTPS、WebSocket）
-- **DNS解析器**：使用阿里云HTTPDNS服务解析域名对应的IP地址
 
-### 3. **DNS解析流程**
-- **缓存检查**：首先检查本地缓存中是否有有效的IP地址
-- **HTTPDNS解析**：调用阿里云HTTPDNS服务进行域名解析
-- **系统DNS回退**：如果HTTPDNS解析失败，自动回退到系统DNS
+- **请求解析器**：解析 HTTP/HTTPS/WebSocket 请求，提取目标域名和端口
+- **协议检测器**：自动识别请求协议类型（HTTP/1.1、HTTP/2、HTTPS、WebSocket）
+- **DNS 解析器**：使用阿里云 HTTPDNS 服务解析域名对应的 IP 地址
+
+### 3. **DNS 解析流程**
+
+- **缓存检查**：首先检查本地缓存中是否有有效的 IP 地址
+- **HTTPDNS 解析**：调用阿里云 HTTPDNS 服务进行域名解析
+- **系统 DNS 回退**：如果 HTTPDNS 解析失败，自动回退到系统 DNS
 - **结果缓存**：将解析结果缓存到本地，提升后续请求速度
 
 ### 4. **目标服务器连接**
-- **Socket连接**：使用解析得到的IP地址建立到目标服务器的连接
-- **请求转发**：修改请求头中的Host信息，转发原始请求到目标服务器
+
+- **Socket 连接**：使用解析得到的 IP 地址建立到目标服务器的连接
+- **请求转发**：修改请求头中的 Host 信息，转发原始请求到目标服务器
 - **响应处理**：接收目标服务器的响应，转发回客户端
 
 ### 5. **连接管理**
-- **连接池**：管理Socket连接，支持连接复用
+
+- **连接池**：管理 Socket 连接，支持连接复用
 - **错误处理**：处理网络错误、超时、重试等异常情况
 - **日志记录**：记录详细的请求处理日志，便于调试和监控
 
 ### 6. **性能优化**
-- **智能缓存**：DNS解析结果缓存，减少重复解析
-- **连接复用**：复用Socket连接，减少连接建立开销
-- **协议优化**：支持HTTP/2协议，提升传输效率
-- **负载均衡**：利用阿里云HTTPDNS的负载均衡能力
+
+- **智能缓存**：DNS 解析结果缓存，减少重复解析
+- **连接复用**：复用 Socket 连接，减少连接建立开销
+- **协议优化**：支持 HTTP/2 协议，提升传输效率
+- **负载均衡**：利用阿里云 HTTPDNS 的负载均衡能力
 
 </details>
 
 ## 功能特性
 
-- **HTTPDNS解析**: 通过阿里云HTTPDNS服务解析域名，提升解析速度和准确性
-- **智能代理**: 自动启动本地代理服务器，支持HTTP/1.1和HTTP/2协议
+- **HTTPDNS 解析**: 通过阿里云 HTTPDNS 服务解析域名，提升解析速度和准确性
+- **智能代理**: 自动启动本地代理服务器，支持 HTTP/1.1 和 HTTP/2 协议
 - **端口管理**: 智能端口分配和冲突处理，无需手动管理
-- **多客户端支持**: 完美支持Dio、HttpClient等主流HTTP客户端
-- **缓存优化**: 内置DNS缓存机制，提升性能
+- **多客户端支持**: 完美支持 Dio、HttpClient 等主流 HTTP 客户端
+- **缓存优化**: 内置 DNS 缓存机制，提升性能
 - **错误处理**: 完善的错误处理和回退机制
+- **API 简洁**: 提供简洁易用的公共 API，隐藏内部实现细节
 
 ## 快速开始
 
@@ -130,7 +139,7 @@ dependencies:
   flutter_ali_http_dns:
     git:
       url: https://github.com/jixiaoyong/flutter_ali_http_dns
-      ref: master  # 或指定版本标签，如 v0.0.1
+      ref: master # 或指定版本标签，如 v0.0.1
 ```
 
 #### 方式二：pub.dev 依赖（TODO：待发布到 pub.dev）
@@ -184,7 +193,6 @@ class _MyAppState extends State<MyApp> {
 }
 ```
 
-
 ### 3. 最简单的用法
 
 #### 仅域名解析（无需代理）
@@ -214,7 +222,7 @@ void dispose() {
 }
 ```
 
-#### 使用代理进行HTTP请求
+#### 使用代理进行 HTTP 请求
 
 ```dart
 // 1. 启动代理服务器（仅在需要代理时启动）
@@ -234,7 +242,7 @@ final response = await request.close();
 
 ## 进阶用法
 
-### 1. 配置Dio客户端
+### 1. 配置 Dio 客户端
 
 ```dart
 import 'package:dio/dio.dart';
@@ -278,9 +286,9 @@ final proxyConfig = ProxyConfig(
 await dnsService.startProxy(proxyConfig);
 ```
 
-### 3. 高级DNS配置
+### 3. 高级 DNS 配置
 
-配置属性参考[云解析DNS/解析服务/移动解析HTTPDNS/开发参考](https://help.aliyun.com/zh/dns/httpdns-development-reference)
+配置属性参考[云解析 DNS/解析服务/移动解析 HTTPDNS/开发参考](https://help.aliyun.com/zh/dns/httpdns-development-reference)
 
 ```dart
 final dnsConfig = DnsConfig(
@@ -371,7 +379,7 @@ class _MyAppState extends State<MyApp> {
         accessKeyId: 'your_access_key_id',
         accessKeySecret: 'your_access_key_secret',
       ));
-      
+
       if (success) {
         setState(() => _isInitialized = true);
         print('DNS服务初始化成功');
@@ -446,10 +454,10 @@ class NetworkService {
   /// 使用代理发起HTTP请求
   Future<void> makeHttpRequest() async {
     await _ensureProxyStarted(); // 按需启动代理
-    
+
     final client = HttpClient();
     await _dnsService.configureHttpClient(client);
-    
+
     // 发起请求...
   }
 
@@ -485,33 +493,34 @@ for (final domain in domains) {
 
 ## API 参考
 
-### DNS配置 (DnsConfig)
+### DNS 配置 (DnsConfig)
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `accountId` | `String` | - | 阿里云账号ID |
-| `accessKeyId` | `String` | - | 访问密钥ID |
-| `accessKeySecret` | `String` | - | 访问密钥Secret |
-| `enableCache` | `bool` | `true` | 是否启用缓存 |
-| `maxCacheSize` | `int` | `100` | 最大缓存大小 |
-| `enableSpeedTest` | `bool` | `true` | 是否启用速度测试 |
-| `timeout` | `int` | `3` | 超时时间（秒） |
-| `enableIPv6` | `bool` | `false` | 是否启用IPv6 |
-| `preloadDomains` | `List<String>` | `[]` | 预加载域名列表 |
+| 参数              | 类型           | 默认值  | 说明             |
+| ----------------- | -------------- | ------- | ---------------- |
+| `accountId`       | `String`       | -       | 阿里云账号 ID    |
+| `accessKeyId`     | `String`       | -       | 访问密钥 ID      |
+| `accessKeySecret` | `String`       | -       | 访问密钥 Secret  |
+| `enableCache`     | `bool`         | `true`  | 是否启用缓存     |
+| `maxCacheSize`    | `int`          | `100`   | 最大缓存大小     |
+| `enableSpeedTest` | `bool`         | `true`  | 是否启用速度测试 |
+| `timeout`         | `int`          | `3`     | 超时时间（秒）   |
+| `enableIPv6`      | `bool`         | `false` | 是否启用 IPv6    |
+| `preloadDomains`  | `List<String>` | `[]`    | 预加载域名列表   |
 
 ### 代理配置 (ProxyConfig)
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `portPool` | `List<int>?` | `null` | 端口池（优先使用的端口列表） |
-| `startPort` | `int?` | `4041` | 自动分配的起始端口 |
-| `endPort` | `int?` | `startPort + 100` | 自动分配的结束端口 |
-| `enabled` | `bool` | `true` | 是否启用代理 |
-| `host` | `String` | `'localhost'` | 代理主机 |
+| 参数        | 类型         | 默认值            | 说明                         |
+| ----------- | ------------ | ----------------- | ---------------------------- |
+| `portPool`  | `List<int>?` | `null`            | 端口池（优先使用的端口列表） |
+| `startPort` | `int?`       | `4041`            | 自动分配的起始端口           |
+| `endPort`   | `int?`       | `startPort + 100` | 自动分配的结束端口           |
+| `enabled`   | `bool`       | `true`            | 是否启用代理                 |
+| `host`      | `String`     | `'localhost'`     | 代理主机                     |
 
 ### 核心方法
 
 #### 初始化和配置
+
 ```dart
 Future<bool> initialize(DnsConfig config)
 Future<bool> startProxy([ProxyConfig? config])
@@ -519,12 +528,14 @@ Future<bool> stopProxy()
 ```
 
 #### 域名解析
+
 ```dart
 Future<String> resolveDomain(String domain, {bool enableSystemDnsFallback = true})
 Future<String?> resolveDomainNullable(String domain, {bool enableSystemDnsFallback = true})
 ```
 
 #### 代理管理
+
 ```dart
 Future<String?> getProxyAddress()
 Future<String?> getHttp2ProxyAddress()
@@ -533,6 +544,7 @@ Future<bool> checkProxyStatus()
 ```
 
 #### 端口管理
+
 ```dart
 Future<int?> getMainPort()
 Future<List<int>> getActualPorts()
@@ -540,6 +552,7 @@ Future<bool> isPortAvailable(int port)
 ```
 
 #### 客户端配置
+
 ```dart
 Future<void> configureHttpClient(HttpClient client)
 ```
@@ -548,53 +561,56 @@ Future<void> configureHttpClient(HttpClient client)
 
 ### 1. 插件生命周期
 
-1. **初始化阶段**: 调用`initialize()`方法，配置DNS服务
+1. **初始化阶段**: 调用`initialize()`方法，配置 DNS 服务
 2. **域名解析**: 可以直接使用`resolveDomain()`进行域名解析，无需代理
 3. **代理启动**: 按需调用`startProxy()`启动代理服务器
 4. **资源清理**: 调用`dispose()`清理所有资源
 
-### 2. DNS解析流程
+### 2. DNS 解析流程
 
-1. **HTTPDNS解析**: 优先使用阿里云HTTPDNS服务解析域名
-2. **系统DNS回退**: 如果HTTPDNS解析失败，自动回退到系统DNS
+1. **HTTPDNS 解析**: 优先使用阿里云 HTTPDNS 服务解析域名
+2. **系统 DNS 回退**: 如果 HTTPDNS 解析失败，自动回退到系统 DNS
 3. **缓存机制**: 解析结果会被缓存，提升后续请求速度
 
 ### 3. 代理服务器
 
-1. **按需启动**: 仅在需要代理HTTP请求时才启动代理服务器
+1. **按需启动**: 仅在需要代理 HTTP 请求时才启动代理服务器
 2. **端口分配**: 智能分配可用端口，自动处理端口冲突
-3. **协议支持**: 支持HTTP/1.1和HTTP/2协议
+3. **协议支持**: 支持 HTTP/1.1 和 HTTP/2 协议
 4. **请求转发**: 将客户端请求转发到目标服务器
 
 ### 3. 端口分配策略
 
-1. **优先级1**: 使用配置的端口池中的端口
-2. **优先级2**: 使用配置的端口范围（startPort到endPort）
-3. **优先级3**: 自动寻找可用端口（突破配置范围）
+1. **优先级 1**: 使用配置的端口池中的端口
+2. **优先级 2**: 使用配置的端口范围（startPort 到 endPort）
+3. **优先级 3**: 自动寻找可用端口（突破配置范围）
 4. **冲突处理**: 自动处理端口冲突
 
 ## 使用场景
 
 ### 1. 移动应用网络优化
+
 - 提升域名解析速度
 - 减少网络延迟
 - 提高应用响应速度
 
 ### 2. 多端统一网络处理
-- 统一Android和iOS的网络处理逻辑
+
+- 统一 Android 和 iOS 的网络处理逻辑
 - 简化网络配置管理
 
 ### 3. 网络调试和测试
+
 - 本地代理便于网络调试
-- 支持多种HTTP客户端
+- 支持多种 HTTP 客户端
 
 ## 示例项目
 
 查看 `example/` 目录获取完整的使用示例：
 
-- **基础测试** (`basic_tests.dart`): 域名解析、HttpClient、Dio测试
-- **HTTP/2测试** (`http2_tests.dart`): HTTP/2协议支持测试
-- **高级功能测试** (`advanced_tests.dart`): 性能测试、错误处理测试
+- **基础测试** (`basic_tests.dart`): 域名解析、HttpClient、Dio 测试
+- **HTTP/2 测试** (`http2_tests.dart`): HTTP/2 协议支持测试
+- **高级功能测试** (`advanced_tests.dart`): 端口管理、代理配置、性能测试、错误处理测试
 
 ### 运行示例
 
@@ -611,34 +627,44 @@ flutter run
 ## 常见问题
 
 ### Q: 如何获取代理端口？
+
 A: 使用`getMainPort()`获取默认代理端口，或使用`getProxyAddress()`获取代理地址。
 
 ### Q: 如何处理端口冲突？
-A: SDK会自动处理端口冲突，如果指定端口被占用，会自动寻找下一个可用端口。
 
-### Q: 如何获取HTTP/2代理地址？
-A: 使用`getHttp2ProxyAddress()`获取HTTP/2代理地址。
+A: SDK 会自动处理端口冲突，如果指定端口被占用，会自动寻找下一个可用端口。
+
+### Q: 如何获取 HTTP/2 代理地址？
+
+A: 使用`getHttp2ProxyAddress()`获取 HTTP/2 代理地址。
 
 ### Q: 代理服务器会自动清理端口吗？
+
 A: 是的，当调用`stopProxy()`时，所有端口都会被自动清理。
 
 ### Q: 如何检查端口是否可用？
+
 A: 使用`isPortAvailable(int port)`方法检查端口是否可用。
 
-### Q: 支持哪些HTTP客户端？
-A: 支持Dio、HttpClient等主流HTTP客户端，也可以自定义配置其他客户端。
+### Q: 支持哪些 HTTP 客户端？
+
+A: 支持 Dio、HttpClient 等主流 HTTP 客户端，也可以自定义配置其他客户端。
 
 ### Q: 什么时候应该初始化插件？
+
 A: 建议在用户同意隐私协议之后，第一次请求网络之前进行初始化。这样可以确保在用户同意的情况下才开始网络活动。
 
 ### Q: 什么时候应该启动代理服务器？
-A: 代理服务器应该按需启动。如果只需要域名解析功能，无需启动代理；只有在需要代理HTTP请求时才启动代理服务器。
 
-### Q: 什么时候应该调用dispose()？
-A: 在应用退出或不再使用插件时调用dispose()方法，它会自动停止代理服务器并清理所有资源。
+A: 代理服务器应该按需启动。如果只需要域名解析功能，无需启动代理；只有在需要代理 HTTP 请求时才启动代理服务器。
+
+### Q: 什么时候应该调用 dispose()？
+
+A: 在应用退出或不再使用插件时调用 dispose()方法，它会自动停止代理服务器并清理所有资源。
 
 ### Q: 如果只做域名解析，需要启动代理吗？
-A: 不需要。域名解析功能不需要代理服务器，只有HTTP请求代理才需要启动代理服务器。
+
+A: 不需要。域名解析功能不需要代理服务器，只有 HTTP 请求代理才需要启动代理服务器。
 
 ## 开发指南
 

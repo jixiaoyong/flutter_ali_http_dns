@@ -8,7 +8,6 @@ import 'src/services/dns_resolver.dart';
 import 'src/services/proxy_server.dart';
 import 'src/utils/logger.dart';
 import 'src/utils/port_utils.dart';
-import 'src/utils/process_utils.dart';
 
 export 'src/models/dns_config.dart';
 export 'src/models/proxy_config.dart';
@@ -303,107 +302,10 @@ class FlutterAliHttpDns {
     return _isProxyRunning;
   }
 
-  /// 获取端口占用详细信息
-  ///
-  /// [port] 要检查的端口号
-  /// 返回端口占用信息，包括进程ID、进程名称等
-  static Future<PortInfo> getPortInfo(int port) async {
-    return await PortUtils.getPortInfo(port);
-  }
-
-  /// 获取当前应用进程ID
-  ///
-  /// 返回当前应用的进程ID
-  static int getCurrentProcessId() {
-    // 直接调用静态方法获取当前 PID
-    return ProcessUtils.getCurrentPid();
-  }
-
-  /// 检查端口是否被自己的应用占用
-  ///
-  /// [port] 要检查的端口号
-  /// 返回 true 如果是被自己的应用占用，false 如果是被其他程序占用或端口可用
-  static Future<bool> isPortUsedByOwnApp(int port) async {
-    final portInfo = await getPortInfo(port);
-    return portInfo.isOwnProcess;
-  }
-
-  /// 获取当前代理的可用端口（内部使用）
-  ///
-  /// 返回当前代理服务器监听的端口列表
-  Future<List<int>> getAvailablePorts() async {
-    if (!_isProxyRunning || _proxyServer == null) {
-      return [];
-    }
-
-    return _proxyServer!.getListeningPorts();
-  }
-
-  /// 注册端口监听（内部使用）
-  ///
-  /// [port] 要监听的端口
-  /// 返回注册是否成功
-  Future<bool> registerPort(int port) async {
-    if (!_isProxyRunning || _proxyServer == null) {
-      Logger.warning('Proxy server is not running');
-      return false;
-    }
-
-    return await _proxyServer!.registerPort(port);
-  }
-
-  /// 取消注册端口监听（内部使用）
-  ///
-  /// [port] 要取消监听的端口
-  /// 返回取消注册是否成功
-  Future<bool> deregisterPort(int port) async {
-    if (!_isProxyRunning || _proxyServer == null) {
-      Logger.warning('Proxy server is not running');
-      return false;
-    }
-
-    return await _proxyServer!.deregisterPort(port);
-  }
-
-  /// 检查端口是否正在被监听（内部使用）
-  ///
-  /// [port] 要检查的端口
-  /// 返回端口是否正在被监听
-  /// 注意：用户通常不需要手动调用此方法，主要用于内部端口管理
-  Future<bool> isPortListening(int port) async {
-    if (!_isProxyRunning || _proxyServer == null) {
-      return false;
-    }
-
-    return _proxyServer!.isPortListening(port);
-  }
-
   /// 获取当前代理服务器实例
   ///
   /// 返回当前运行的代理服务器实例，如果没有则返回 null
   ProxyServer? get currentProxyServer => _proxyServer;
-
-  /// 获取指定端口的代理服务器实例
-  ///
-  /// [port] 端口号
-  /// 返回指定端口的代理服务器实例，如果没有则返回 null
-  static ProxyServer? getProxyServerByPort(int port) {
-    return ProxyServer.getInstanceByPort(port);
-  }
-
-  /// 停止所有代理服务器实例
-  ///
-  /// 停止当前应用中的所有代理服务器实例
-  static Future<void> stopAllProxyServers() async {
-    await ProxyServer.stopAll();
-  }
-
-  /// 获取所有运行的代理服务器端口
-  ///
-  /// 返回当前应用中所有运行的代理服务器端口列表
-  static List<int> getRunningProxyPorts() {
-    return ProxyServer.getRunningPorts();
-  }
 
   /// 为 HttpClient 配置代理
   ///
