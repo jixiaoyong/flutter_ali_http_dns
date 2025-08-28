@@ -9,6 +9,8 @@ class BasicTests {
   final FlutterAliHttpDns _dnsService;
   final Function(String) onLogMessage;
   final Function(String) onResultUpdate;
+  final Function(String) onHttpResultUpdate; // 新增HttpClient结果回调
+  final Function(String) onDioResultUpdate; // 新增Dio结果回调
   final Function(String) onSnackBarMessage;
   final bool isProxyRunning;
   final bool enableSystemDnsFallback;
@@ -17,6 +19,8 @@ class BasicTests {
     required FlutterAliHttpDns dnsService,
     required this.onLogMessage,
     required this.onResultUpdate,
+    required this.onHttpResultUpdate,
+    required this.onDioResultUpdate,
     required this.onSnackBarMessage,
     required this.isProxyRunning,
     required this.enableSystemDnsFallback,
@@ -81,34 +85,101 @@ class BasicTests {
   /// 测试HttpClient
   Future<void> testHttpClient() async {
     if (!isProxyRunning) {
-      onLogMessage('请先启动代理服务器');
-      onResultUpdate('请先启动代理服务器');
+      final errorMessage = '❌ HttpClient 测试失败\n'
+          '   错误: 代理服务器未启动\n'
+          '   解决方案: 请先点击"启动代理"按钮启动代理服务器\n'
+          '   状态: 测试已终止';
+      
+      onLogMessage('HttpClient 测试失败: 代理服务器未启动');
+      onHttpResultUpdate(errorMessage);
+      onSnackBarMessage('HttpClient 测试失败: 请先启动代理服务器');
       return;
     }
 
     try {
-      onResultUpdate('正在测试 HttpClient...');
+      onHttpResultUpdate('正在测试 HttpClient...');
 
       final client = HttpClient();
       await _dnsService.configureHttpClient(client);
 
       onLogMessage('HttpClient 已配置代理');
 
-      // 测试普通 HTTP 请求（保持原域名和端口）
-      final request = await client.getUrl(Uri.parse('https://www.taobao.com'));
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
+      // 测试多个URL以获取更详细的结果
+      final testUrls = [
+        'https://httpbin.org/ip',
+        'https://httpbin.org/user-agent',
+        'https://www.taobao.com',
+      ];
 
-      final result = 'HttpClient 请求成功\n'
-          '状态码: ${response.statusCode}\n'
-          '响应长度: ${responseBody.length} 字符\n'
-          '代理配置: 已启用';
+      final results = <String>[];
+      int successCount = 0;
+      int totalCount = testUrls.length;
+
+      for (final url in testUrls) {
+        try {
+          onLogMessage('测试 HttpClient 请求: $url');
+          
+          final stopwatch = Stopwatch()..start();
+          
+          // 测试普通 HTTP 请求（保持原域名和端口）
+          final request = await client.getUrl(Uri.parse(url));
+          final response = await request.close();
+          final responseBody = await response.transform(utf8.decoder).join();
+          
+          stopwatch.stop();
+          final duration = stopwatch.elapsedMilliseconds;
+
+          // 获取响应头信息
+          final contentType = response.headers.contentType?.toString() ?? '未知';
+          final contentLength = response.headers.contentLength ?? responseBody.length;
+          final server = response.headers.value('server') ?? '未知';
+          final date = response.headers.value('date') ?? '未知';
+
+          final result = '✅ $url\n'
+              '   状态码: ${response.statusCode}\n'
+              '   响应时间: ${duration}ms\n'
+              '   内容类型: $contentType\n'
+              '   内容长度: $contentLength 字节\n'
+              '   服务器: $server\n'
+              '   响应时间: $date\n'
+              '   响应预览: ${responseBody.length > 100 ? responseBody.substring(0, 100) + '...' : responseBody}';
+          
+          results.add(result);
+          successCount++;
+          onLogMessage('HttpClient 请求成功: $url (${duration}ms)');
+          
+          // 实时更新结果
+          final currentResult = 'HttpClient 测试进行中...\n'
+              '已完成: $successCount/$totalCount\n'
+              '详细结果:\n${results.join('\n\n')}';
+          onHttpResultUpdate(currentResult);
+        } catch (e) {
+          final result = '❌ $url\n'
+              '   错误: $e';
+          results.add(result);
+          onLogMessage('HttpClient 请求失败: $url -> $e');
+          
+          // 实时更新结果
+          final currentResult = 'HttpClient 测试进行中...\n'
+              '已完成: $successCount/$totalCount\n'
+              '详细结果:\n${results.join('\n\n')}';
+          onHttpResultUpdate(currentResult);
+        }
+      }
+
+      final successRate = (successCount / totalCount * 100).toStringAsFixed(1);
+      final summary = 'HttpClient 测试统计: $successCount/$totalCount 成功 (${successRate}%)';
       
-      onResultUpdate(result);
-      onLogMessage('HttpClient 测试成功: 状态码 ${response.statusCode}');
-      onSnackBarMessage('HttpClient 测试成功: 状态码 ${response.statusCode}');
+      final detailedResult = '$summary\n\n${results.join('\n\n')}';
+      
+      onHttpResultUpdate(detailedResult);
+      onLogMessage('HttpClient 测试完成: $summary');
+      onSnackBarMessage('HttpClient 测试完成: $successCount/$totalCount 成功');
     } catch (e) {
-      onResultUpdate('HttpClient 请求错误: $e');
+      final errorMessage = '❌ HttpClient 配置错误\n'
+          '   错误: $e\n'
+          '   状态: 测试已终止';
+      onHttpResultUpdate(errorMessage);
       onLogMessage('HttpClient 测试失败: $e');
       onSnackBarMessage('HttpClient 测试失败: ${e.toString().split(':').first}');
     }
@@ -117,13 +188,19 @@ class BasicTests {
   /// 测试Dio
   Future<void> testDio() async {
     if (!isProxyRunning) {
-      onLogMessage('请先启动代理服务器');
-      onResultUpdate('请先启动代理服务器');
+      final errorMessage = '❌ Dio 测试失败\n'
+          '   错误: 代理服务器未启动\n'
+          '   解决方案: 请先点击"启动代理"按钮启动代理服务器\n'
+          '   状态: 测试已终止';
+      
+      onLogMessage('Dio 测试失败: 代理服务器未启动');
+      onDioResultUpdate(errorMessage);
+      onSnackBarMessage('Dio 测试失败: 请先启动代理服务器');
       return;
     }
 
     try {
-      onResultUpdate('正在测试 Dio...');
+      onDioResultUpdate('正在测试 Dio...');
 
       final dio = Dio();
       final proxyConfig = await _dnsService.getDioProxyConfig();
@@ -142,19 +219,83 @@ class BasicTests {
         onLogMessage('无法获取代理配置');
       }
 
-      // 测试 Dio 请求（保持原域名和端口）
-      final response = await dio.get('https://www.douyin.com');
+      // 测试多个URL以获取更详细的结果
+      final testUrls = [
+        'https://httpbin.org/ip',
+        'https://httpbin.org/user-agent',
+        'https://www.douyin.com',
+      ];
 
-      final result = 'Dio 请求成功\n'
-          '状态码: ${response.statusCode}\n'
-          '响应长度: ${response.data.toString().length} 字符\n'
-          '代理配置: ${proxyConfig != null ? '已启用' : '未配置'}';
+      final results = <String>[];
+      int successCount = 0;
+      int totalCount = testUrls.length;
+
+      for (final url in testUrls) {
+        try {
+          onLogMessage('测试 Dio 请求: $url');
+          
+          final stopwatch = Stopwatch()..start();
+          
+          // 测试 Dio 请求（保持原域名和端口）
+          final response = await dio.get(url);
+          
+          stopwatch.stop();
+          final duration = stopwatch.elapsedMilliseconds;
+
+          // 获取响应头信息
+          final headers = response.headers.map;
+          final contentType = headers['content-type']?.first ?? '未知';
+          final contentLength = headers['content-length']?.first ?? response.data.toString().length.toString();
+          final server = headers['server']?.first ?? '未知';
+          final date = headers['date']?.first ?? '未知';
+
+          final result = '✅ $url\n'
+              '   状态码: ${response.statusCode}\n'
+              '   响应时间: ${duration}ms\n'
+              '   内容类型: $contentType\n'
+              '   内容长度: $contentLength 字节\n'
+              '   服务器: $server\n'
+              '   响应时间: $date\n'
+              '   代理配置: ${proxyConfig != null ? '已启用 (${proxyConfig['host']}:${proxyConfig['port']})' : '未配置'}\n'
+              '   响应预览: ${response.data.toString().length > 100 ? response.data.toString().substring(0, 100) + '...' : response.data.toString()}';
+          
+          results.add(result);
+          successCount++;
+          onLogMessage('Dio 请求成功: $url (${duration}ms)');
+          
+          // 实时更新结果
+          final currentResult = 'Dio 测试进行中...\n'
+              '已完成: $successCount/$totalCount\n'
+              '详细结果:\n${results.join('\n\n')}';
+          onDioResultUpdate(currentResult);
+        } catch (e) {
+          final result = '❌ $url\n'
+              '   错误: $e\n'
+              '   代理配置: ${proxyConfig != null ? '已启用 (${proxyConfig['host']}:${proxyConfig['port']})' : '未配置'}';
+          results.add(result);
+          onLogMessage('Dio 请求失败: $url -> $e');
+          
+          // 实时更新结果
+          final currentResult = 'Dio 测试进行中...\n'
+              '已完成: $successCount/$totalCount\n'
+              '详细结果:\n${results.join('\n\n')}';
+          onDioResultUpdate(currentResult);
+        }
+      }
+
+      final successRate = (successCount / totalCount * 100).toStringAsFixed(1);
+      final summary = 'Dio 测试统计: $successCount/$totalCount 成功 (${successRate}%)';
       
-      onResultUpdate(result);
-      onLogMessage('Dio 测试成功: 状态码 ${response.statusCode}');
-      onSnackBarMessage('Dio 测试成功: 状态码 ${response.statusCode}');
+      final detailedResult = '$summary\n\n${results.join('\n\n')}';
+      
+      onDioResultUpdate(detailedResult);
+      onLogMessage('Dio 测试完成: $summary');
+      onSnackBarMessage('Dio 测试完成: $successCount/$totalCount 成功');
     } catch (e) {
-      onResultUpdate('Dio 请求错误: $e');
+      final errorMessage = '❌ Dio 配置错误\n'
+          '   错误: $e\n'
+          '   状态: 测试已终止';
+      onDioResultUpdate(errorMessage);
       onLogMessage('Dio 测试失败: $e');
       onSnackBarMessage('Dio 测试失败: ${e.toString().split(':').first}');
     }
