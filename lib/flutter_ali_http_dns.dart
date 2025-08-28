@@ -115,6 +115,17 @@ class FlutterAliHttpDns {
     return result ?? domain;
   }
 
+  /// 动态设置是否启用缓存
+  ///
+  /// [enable] 是否启用
+  Future<void> setEnableCache(bool enable) async {
+    if (!_isInitialized) {
+      Logger.error('DNS service not initialized. Call initialize() first.');
+      return;
+    }
+    await _platform.setEnableCache(enable);
+  }
+
   /// 启动代理服务器
   ///
   /// [config] 代理配置参数
@@ -390,6 +401,37 @@ class FlutterAliHttpDns {
       }
     }
     return null;
+  }
+
+  /// 清除DNS缓存
+  ///
+  /// [hostNames] 可选的域名列表，如果提供则清除指定域名的缓存，否则清除所有缓存
+  /// 返回清除是否成功
+  Future<bool> clearCache([List<String>? hostNames]) async {
+    if (!_isInitialized) {
+      Logger.error('DNS service not initialized. Call initialize() first.');
+      return false;
+    }
+
+    try {
+      Logger.info('Clearing DNS cache for: ${hostNames ?? 'all hosts'}');
+      
+      // 调用平台方法清除缓存
+      final platformResult = await _platform.clearCache(hostNames);
+      
+      // 同时清除本地DNS解析器缓存
+      if (hostNames == null || hostNames.isEmpty) {
+        _dnsResolver.clearCache();
+      } else {
+        _dnsResolver.clearHosts(hostNames);
+      }
+      
+      Logger.info('DNS cache cleared successfully');
+      return platformResult;
+    } catch (e) {
+      Logger.error('Failed to clear DNS cache', e);
+      return false;
+    }
   }
 
   /// 清理资源

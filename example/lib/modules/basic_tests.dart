@@ -13,7 +13,6 @@ class BasicTests {
   final Function(String) onDioResultUpdate; // 新增Dio结果回调
   final Function(String) onSnackBarMessage;
   final bool isProxyRunning;
-  final bool enableSystemDnsFallback;
 
   BasicTests({
     required FlutterAliHttpDns dnsService,
@@ -23,11 +22,10 @@ class BasicTests {
     required this.onDioResultUpdate,
     required this.onSnackBarMessage,
     required this.isProxyRunning,
-    required this.enableSystemDnsFallback,
   }) : _dnsService = dnsService;
 
   /// 测试域名解析
-  Future<void> testDomainResolution() async {
+  Future<void> testDomainResolution({required bool enableSystemDnsFallback}) async {
     try {
       onResultUpdate('正在解析...');
 

@@ -13,7 +13,7 @@ A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  s.source_files = 'Classes/**/*.{h,m}'
   s.dependency 'Flutter'
   s.platform = :ios, '12.0'
 
@@ -24,12 +24,12 @@ A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support
     'CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES' => 'YES',
     'BUILD_LIBRARY_FOR_DISTRIBUTION' => 'YES',
     'HEADER_SEARCH_PATHS' => '$(PODS_ROOT)/AlicloudPDNS/pdns-sdk-ios.framework/Headers',
+    'FRAMEWORK_SEARCH_PATHS' => '$(PODS_ROOT)/AlicloudPDNS',
     'ONLY_ACTIVE_ARCH' => 'YES'
   }
   s.swift_version = '5.0'
   
   # 阿里云 HttpDNS SDK 依赖
-  # 插件会自动处理依赖，使用插件的项目无需额外配置
   s.dependency 'AlicloudPDNS'
   
   # 处理静态框架依赖问题

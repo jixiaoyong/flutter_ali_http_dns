@@ -21,7 +21,7 @@ class DnsResolver {
     if (config.preloadDomains.isNotEmpty) {
       Logger.info('Preloading domains: ${config.preloadDomains}');
       for (final domain in config.preloadDomains) {
-        final result = await resolve(domain, enableSystemDnsFallback: true);
+        final result = await resolve(domain, enableSystemDnsFallback: false);
         if (result != null) {
           Logger.debug('Preloaded domain: $domain -> $result');
         } else {
@@ -173,13 +173,27 @@ class DnsResolver {
     Logger.debug('Cached IP: $domain -> $ip (TTL: ${_config!.maxCacheTTL}s)');
   }
 
-  /// 清理缓存
+  /// 清除所有缓存
   void clearCache() {
     final size = _cache.length;
     _cache.clear();
     _cacheExpiry.clear();
     _retryCount.clear();
     Logger.info('Cache cleared, removed $size entries');
+  }
+
+  /// 清除指定域名的缓存
+  void clearHosts(List<String> hostNames) {
+    int count = 0;
+    for (final domain in hostNames) {
+      if (_cache.containsKey(domain)) {
+        _cache.remove(domain);
+        _cacheExpiry.remove(domain);
+        _retryCount.remove(domain);
+        count++;
+      }
+    }
+    Logger.info('Cleared $count specific hosts from cache: $hostNames');
   }
 
   /// 获取缓存统计信息

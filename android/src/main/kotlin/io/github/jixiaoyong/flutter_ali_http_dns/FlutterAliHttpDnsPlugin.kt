@@ -14,10 +14,6 @@ import java.util.concurrent.TimeUnit
 
 /** FlutterAliHttpDnsPlugin */
 class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
-    /// The MethodChannel that will the communication between Flutter and native Android
-    ///
-    /// This local reference serves to register the plugin with the Flutter Engine and unregister it
-    /// when the Flutter Engine is detached from the Activity
     private lateinit var channel: MethodChannel
     private var dnsResolver: DNSResolver? = null
     private val gson = Gson()
@@ -26,21 +22,15 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
     private val executor = Executors.newCachedThreadPool()
 
     companion object {
-        private const val TAG = "FlutterAliHttpDns"
-        private const val DNS_TIMEOUT_SECONDS = 15L
+        private const val TAG = "[Android]"
+        private const val DNS_TIMEOUT_SECONDS = 10L
 
-        /**
-         * 打印调试日志（仅在debug模式下）
-         */
         private fun logDebug(message: String) {
             if (BuildConfig.DEBUG) {
                 android.util.Log.d(TAG, message)
             }
         }
 
-        /**
-         * 打印错误日志（仅在debug模式下）
-         */
         private fun logError(message: String, throwable: Throwable? = null) {
             if (BuildConfig.DEBUG) {
                 if (throwable != null) {
@@ -51,9 +41,6 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
             }
         }
 
-        /**
-         * 检查网络连接状态
-         */
         private fun isNetworkAvailable(context: android.content.Context): Boolean {
             try {
                 val connectivityManager =
@@ -84,29 +71,35 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
         when (call.method) {
             "initializeDns" -> {
-                // 添加详细的日志输出（仅在debug模式下）
-                logDebug("Received initializeDns call with arguments: ${call.arguments}")
-                logDebug("Arguments type: ${call.arguments?.javaClass?.simpleName}")
-
-                // 尝试从参数中获取配置
                 val configMap = call.arguments as? Map<String, Any>
                 if (configMap != null) {
-                    // 将Map转换为JSON字符串
                     val configJson = gson.toJson(configMap)
-                    logDebug("Config JSON: $configJson")
                     initializeDns(configJson, result)
                 } else {
-                    logError("Config is null or invalid type. Expected Map<String, Any>, got: ${call.arguments?.javaClass?.name}")
                     result.error("INVALID_ARGUMENT", "Config is required", null)
                 }
             }
 
             "resolveDomain" -> {
-                val domain = call.argument<String>("domain")
+                val domain = call.arguments as? String
                 if (domain != null) {
                     resolveDomain(domain, result)
                 } else {
                     result.error("INVALID_ARGUMENT", "Domain is required", null)
+                }
+            }
+
+            "clearCache" -> {
+                val hostNames = call.arguments as? List<String>
+                clearCache(hostNames, result)
+            }
+
+            "setEnableCache" -> {
+                val enable = call.argument<Boolean>("enable")
+                if (enable != null) {
+                    setEnableCache(enable, result)
+                } else {
+                    result.error("INVALID_ARGUMENT", "Enable flag is required", null)
                 }
             }
 
@@ -116,84 +109,55 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
         }
     }
 
+    private fun setEnableCache(enable: Boolean, result: Result) {
+        try {
+            logDebug("Setting cache enabled: $enable")
+            DNSResolver.setEnableCache(enable)
+            result.success(null)
+        } catch (e: Exception) {
+            logError("Failed to set cache enabled", e)
+            result.error("SET_CACHE_ERROR", "Failed to set cache: ${e.message}", null)
+        }
+    }
+
     private fun initializeDns(configJson: String, result: Result) {
         try {
-            logDebug("Parsing config JSON: $configJson")
             val config = gson.fromJson(configJson, JsonObject::class.java)
-            logDebug("Parsed config: $config")
-
-            // 检查应用上下文
             val context = applicationContext
             if (context == null) {
-                logError("Application context is null")
                 result.error("CONTEXT_ERROR", "Application context not available", null)
                 return
             }
 
-            // 检查网络连接
-            if (!isNetworkAvailable(context)) {
-                logError("Network is not available")
-                result.error("NETWORK_ERROR", "Network connection not available", null)
-                return
-            }
-
-            // 根据官方文档初始化 DNSResolver
-            // DNSResolver.Init(context, accountId, accessKeyId, accessKeySecret)
             val accountId = config.get("accountId").asString
             val accessKeyId = config.get("accessKeyId").asString
             val accessKeySecret = config.get("accessKeySecret").asString
 
-            logDebug("Initializing DNS with accountId: $accountId, accessKeyId: $accessKeyId")
-            logDebug("AccountId length: ${accountId.length}, AccessKeyId length: ${accessKeyId.length}")
-
             try {
                 DNSResolver.Init(context, accountId, accessKeyId, accessKeySecret)
                 dnsResolver = DNSResolver.getInstance()
-                logDebug("DNSResolver.Init completed successfully")
             } catch (e: Exception) {
                 logError("DNSResolver.Init failed", e)
                 result.error("INIT_ERROR", "DNSResolver.Init failed: ${e.message}", null)
                 return
             }
 
-            // 设置保持连接的域名
             val keepAliveDomains = config.getAsJsonArray("keepAliveDomains")
             if (keepAliveDomains != null && keepAliveDomains.size() > 0) {
-                val domains = mutableListOf<String>()
-                for (i in 0 until keepAliveDomains.size()) {
-                    domains.add(keepAliveDomains[i].asString)
-                }
-                logDebug("Setting keep alive domains: $domains")
-                DNSResolver.setKeepAliveDomains(domains.toTypedArray())
+                val domains = Array(keepAliveDomains.size()) { i -> keepAliveDomains[i].asString }
+                DNSResolver.setKeepAliveDomains(domains)
             }
 
-            // 预加载域名
+            val enableCache = config.get("enableCache").asBoolean
+            DNSResolver.setEnableCache(enableCache)
+
             val preloadDomains = config.getAsJsonArray("preloadDomains")
             if (preloadDomains != null && preloadDomains.size() > 0) {
-                val domains = mutableListOf<String>()
-                for (i in 0 until preloadDomains.size()) {
-                    domains.add(preloadDomains[i].asString)
-                }
-                logDebug("Preloading domains: $domains")
-                dnsResolver?.preLoadDomains(DNSResolver.QTYPE_IPV4, domains.toTypedArray())
+                val domains = Array(preloadDomains.size()) { i -> preloadDomains[i].asString }
+                dnsResolver?.preLoadDomains(DNSResolver.QTYPE_IPV4, domains)
             }
 
             isInitialized = true
-            logDebug("DNS initialization completed successfully")
-
-            // 尝试一个简单的测试解析
-            try {
-                val testDomain = "www.aliyun.com"
-                val testIp = dnsResolver?.getIPV4ByHost(testDomain)
-                if (testIp != null && testIp.isNotEmpty() && testIp != testDomain) {
-                    logDebug("HTTP DNS test successful: $testDomain -> $testIp")
-                } else {
-                    logDebug("HTTP DNS test returned: $testIp (may be normal in some environments)")
-                }
-            } catch (e: Exception) {
-                logDebug("HTTP DNS test failed (may be normal): ${e.message}")
-            }
-
             result.success(true)
         } catch (e: Exception) {
             logError("Failed to initialize DNS", e)
@@ -210,11 +174,6 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
 
             // 检查网络连接
             val context = applicationContext
-            if (context != null && !isNetworkAvailable(context)) {
-                logError("Network is not available for domain resolution: $domain")
-                result.error("NETWORK_ERROR", "Network connection not available", null)
-                return
-            }
 
             // 使用异步执行器处理DNS解析，避免阻塞主线程
             executor.submit {
@@ -264,6 +223,28 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
         } catch (e: Exception) {
             logError("Failed to submit DNS resolution task for $domain", e)
             result.error("RESOLUTION_ERROR", "Failed to resolve domain: ${e.message}", null)
+        }
+    }
+
+    private fun clearCache(hostNames: List<String>?, result: Result) {
+        try {
+            if (!isInitialized) {
+                result.error("NOT_INITIALIZED", "DNS service not initialized", null)
+                return
+            }
+
+            logDebug("Clearing DNS cache for: ${hostNames ?: "all hosts"}")
+            
+            if (hostNames == null || hostNames.isEmpty()) {
+                dnsResolver?.clearHostCache(null)
+            } else {
+                dnsResolver?.clearHostCache(hostNames.toTypedArray())
+            }
+            
+            result.success(true)
+        } catch (e: Exception) {
+            logError("Failed to clear cache", e)
+            result.error("CLEAR_CACHE_ERROR", "Failed to clear cache: ${e.message}", null)
         }
     }
 

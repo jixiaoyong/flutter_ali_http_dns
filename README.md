@@ -570,24 +570,59 @@ for (final domain in domains) {
 #### 初始化和配置
 
 ```dart
+// 初始化DNS服务
 Future<bool> initialize(DnsConfig config)
+
+// 启动代理服务器
 Future<bool> startProxy([ProxyConfig? config])
+
+// 停止代理服务器
 Future<bool> stopProxy()
 ```
 
 #### 域名解析
 
 ```dart
+// 解析域名，失败时返回原域名
 Future<String> resolveDomain(String domain, {bool enableSystemDnsFallback = true})
+
+// 解析域名，失败时返回null
 Future<String?> resolveDomainNullable(String domain, {bool enableSystemDnsFallback = true})
+```
+
+#### 缓存管理
+
+```dart
+// 动态开启或关闭原生SDK的缓存功能。此设置在服务初始化后依然可以随时修改。
+Future<void> setEnableCache(bool enable)
+
+// 清除缓存。不带参数时，清除所有域名的缓存；带参数时，清除指定域名列表的缓存。
+Future<bool> clearCache([List<String>? hostNames])
+```
+
+#### 缓存管理
+
+```dart
+// 动态开启或关闭原生SDK的缓存功能。此设置在服务初始化后依然可以随时修改。
+Future<void> setEnableCache(bool enable)
+
+// 清除缓存。不带参数时，清除所有域名的缓存；带参数时，清除指定域名列表的缓存。
+Future<bool> clearCache([List<String>? hostNames])
 ```
 
 #### 代理管理
 
 ```dart
+// 获取默认代理地址 (HTTP/1.1, HTTPS)
 Future<String?> getProxyAddress()
+
+// 获取HTTP/2代理地址
 Future<String?> getHttp2ProxyAddress()
+
+// 获取Dio客户端所需的代理配置
 Future<Map<String, dynamic>?> getDioProxyConfig()
+
+// 检查代理服务器的运行状态
 Future<bool> checkProxyStatus()
 ```
 

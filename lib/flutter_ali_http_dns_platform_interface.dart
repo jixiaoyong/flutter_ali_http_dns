@@ -33,4 +33,18 @@ abstract class FlutterAliHttpDnsPlatform extends PlatformInterface {
   Future<String?> resolveDomain(String domain) {
     throw UnimplementedError('resolveDomain() has not been implemented.');
   }
+
+  /// 清除DNS缓存
+  /// 
+  /// [hostNames] 可选的域名列表，如果提供则清除指定域名的缓存，否则清除所有缓存
+  Future<bool> clearCache([List<String>? hostNames]) {
+    throw UnimplementedError('clearCache() has not been implemented.');
+  }
+
+  /// 动态设置是否启用缓存
+  ///
+  /// [enable] 是否启用
+  Future<void> setEnableCache(bool enable) {
+    throw UnimplementedError('setEnableCache() has not been implemented.');
+  }
 }

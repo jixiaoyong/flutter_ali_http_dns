@@ -174,12 +174,48 @@ class ServiceManager {
   }
 
   /// 清除缓存
-  void clearCache() {
+  Future<void> clearCache([List<String>? hostNames]) async {
     try {
-      onLogMessage('缓存清除功能暂未实现');
-      onStateChanged();
+      if (!_isInitialized) {
+        onLogMessage('DNS服务未初始化，无法清除缓存');
+        onSnackBarMessage('请先初始化DNS服务');
+        return;
+      }
+      
+      final cacheType = hostNames != null ? '指定域名' : '所有';
+      onLogMessage('开始清除${cacheType}DNS缓存...');
+      
+      // 调用SDK的清除缓存方法
+      final success = await _dnsService.clearCache(hostNames);
+      
+      if (success) {
+        onLogMessage('${cacheType}DNS缓存清除成功');
+        onSnackBarMessage('${cacheType}DNS缓存清除成功');
+        onStateChanged();
+      } else {
+        onLogMessage('${cacheType}DNS缓存清除失败');
+        onSnackBarMessage('${cacheType}DNS缓存清除失败');
+      }
     } catch (e) {
       onLogMessage('清除缓存失败: $e');
+      onSnackBarMessage('清除缓存失败: $e');
+    }
+  }
+
+  /// 动态设置是否启用缓存
+  Future<void> setEnableCache(bool enable) async {
+    try {
+      if (!_isInitialized) {
+        onLogMessage('DNS服务未初始化，无法设置缓存状态');
+        onSnackBarMessage('请先初始化DNS服务');
+        return;
+      }
+      onLogMessage('动态设置缓存为: ${enable ? "启用" : "禁用"}');
+      await _dnsService.setEnableCache(enable);
+      onSnackBarMessage('缓存已${enable ? "启用" : "禁用"}');
+    } catch (e) {
+      onLogMessage('设置缓存状态失败: $e');
+      onSnackBarMessage('设置缓存状态失败: $e');
     }
   }
 

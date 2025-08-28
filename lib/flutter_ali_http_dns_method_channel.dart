@@ -40,12 +40,37 @@ class MethodChannelFlutterAliHttpDns extends FlutterAliHttpDnsPlatform {
     try {
       final result = await methodChannel.invokeMethod<String>(
         'resolveDomain',
-        {'domain': domain},
+        domain,
       );
       return result;
     } on PlatformException catch (e) {
       Logger.error('Failed to resolve domain: ${e.message}');
       return null;
+    }
+  }
+
+  @override
+  Future<bool> clearCache([List<String>? hostNames]) async {
+    try {
+      final result = await methodChannel.invokeMethod<bool>('clearCache', hostNames);
+      Logger.debug('Native clear cache result: $result');
+      return result ?? false;
+    } on PlatformException catch (e) {
+      Logger.error('Failed to clear cache: ${e.message}');
+      return false;
+    } catch (e) {
+      Logger.error('Unexpected error during clear cache: $e');
+      return false;
+    }
+  }
+
+  @override
+  Future<void> setEnableCache(bool enable) async {
+    try {
+      await methodChannel.invokeMethod<void>('setEnableCache', {'enable': enable});
+      Logger.debug('Set native cache enabled: $enable');
+    } on PlatformException catch (e) {
+      Logger.error('Failed to set enable cache: ${e.message}');
     }
   }
 }

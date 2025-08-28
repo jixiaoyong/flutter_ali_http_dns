@@ -151,10 +151,12 @@ class UIComponents {
     required bool enableSystemDnsFallback,
     required bool enableCache,
     required bool enableSpeedTest,
+    required TextEditingController hostInputController,
     required VoidCallback onInitializeDns,
     required VoidCallback onStartProxy,
     required VoidCallback onStopProxy,
-    required VoidCallback onClearCache,
+    required VoidCallback onClearAllCache,
+    required VoidCallback onClearHostsCache,
     required ValueChanged<bool> onSystemDnsFallbackChanged,
     required ValueChanged<bool> onCacheChanged,
     required ValueChanged<bool> onSpeedTestChanged,
@@ -186,49 +188,15 @@ class UIComponents {
             // DNS配置选项（仅在未初始化时显示）
             if (!isInitialized) ...[
               Text(
-                'DNS 配置选项',
+                'DNS 初始化配置',
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
               const SizedBox(height: 8),
               
-              // 缓存和测速配置
               Row(
                 children: [
-                  Expanded(
-                    child: Row(
-                      children: [
-                        Switch(
-                          value: enableCache,
-                          onChanged: onCacheChanged,
-                          activeColor: Theme.of(context).primaryColor,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '启用缓存',
-                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                              Text(
-                                '缓存DNS解析结果以提高性能',
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: Colors.grey[600],
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
                   Expanded(
                     child: Row(
                       children: [
@@ -249,7 +217,7 @@ class UIComponents {
                                 ),
                               ),
                               Text(
-                                '启用测速功能选择最优IP',
+                                '选择最优IP',
                                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                                   color: Colors.grey[600],
                                   fontSize: 11,
@@ -319,21 +287,6 @@ class UIComponents {
                 ),
               ],
             ),
-
-            const SizedBox(height: 12),
-
-            // 辅助控制按钮
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onClearCache,
-                    icon: const Icon(Icons.clear_all),
-                    label: const Text('清除缓存'),
-                  ),
-                ),
-              ],
-            ),
             
             const SizedBox(height: 16),
             
@@ -366,13 +319,81 @@ class UIComponents {
                         ),
                       ),
                       Text(
-                        '当HTTPDNS解析失败时回退到系统DNS（可动态修改）',
+                        'HTTPDNS解析失败时回退到系统DNS',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Colors.grey[600],
                           fontSize: 11,
                         ),
                       ),
                     ],
+                  ),
+                ),
+              ],
+            ),
+            // 缓存选项
+            Row(
+              children: [
+                Switch(
+                  value: enableCache,
+                  onChanged: isInitialized ? onCacheChanged : null,
+                  activeColor: Theme.of(context).primaryColor,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '启用缓存',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      Text(
+                        '可动态修改，无需重新初始化',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Colors.grey[600],
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // 清除缓存功能
+            TextField(
+              controller: hostInputController,
+              decoration: const InputDecoration(
+                labelText: '指定域名 (多个用逗号隔开)',
+                hintText: 'e.g. www.taobao.com,www.aliyun.com',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onClearHostsCache,
+                    icon: const Icon(Icons.delete_sweep_outlined),
+                    label: const Text('清除指定缓存'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onClearAllCache,
+                    icon: const Icon(Icons.clear_all),
+                    label: const Text('清除所有缓存'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.red,
+                      side: const BorderSide(color: Colors.red),
+                    ),
                   ),
                 ),
               ],
@@ -389,6 +410,8 @@ class UIComponents {
     required VoidCallback onTestDomainResolution,
     required VoidCallback onTestHttpClient,
     required VoidCallback onTestDio,
+    required VoidCallback onTestSystemDnsFallback,
+    required VoidCallback onTestCacheFunctionality,
   }) {
     return Card(
       elevation: 4,
@@ -482,6 +505,58 @@ class UIComponents {
                 const SizedBox(height: 4),
                 Text(
                   '使用Dio HTTP客户端发送请求，测试代理集成效果',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // 系统DNS回退测试
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: onTestSystemDnsFallback,
+                  icon: const Icon(Icons.swap_horiz),
+                  label: const Text('测试系统DNS回退'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '测试启用/禁用系统DNS回退功能，验证配置是否生效',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            // 缓存功能测试
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                ElevatedButton.icon(
+                  onPressed: onTestCacheFunctionality,
+                  icon: const Icon(Icons.cached),
+                  label: const Text('测试缓存功能'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '测试DNS缓存功能，包括启用缓存、清除缓存等操作',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Colors.grey[600],
                         fontSize: 12,

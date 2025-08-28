@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'modules/modules.dart';
+import 'test_system_dns_fallback.dart';
+import 'test_cache_functionality.dart';
 
 void main() {
   runApp(const MyApp());
@@ -54,8 +56,9 @@ class _MyHomePageState extends State<MyHomePage> {
   String _currentTestResult = '点击按钮开始测试';
   String _currentTestTitle = '测试结果';
 
-  // 日志滚动控制器
+  // 控制器
   final ScrollController _logScrollController = ScrollController();
+  final TextEditingController _hostInputController = TextEditingController();
 
   // 当前测试类型
   String _currentTestType = 'Dio'; // 当前测试类型：'Dio' 或 'HttpClient'
@@ -87,7 +90,6 @@ class _MyHomePageState extends State<MyHomePage> {
       onDioResultUpdate: (result) => setState(() => _dioResult = result),
       onSnackBarMessage: _showSnackBar,
       isProxyRunning: _serviceManager.isProxyRunning,
-      enableSystemDnsFallback: _enableSystemDnsFallback,
     );
 
     _advancedTests = AdvancedTests(
@@ -117,7 +119,6 @@ class _MyHomePageState extends State<MyHomePage> {
       onDioResultUpdate: (result) => setState(() => _dioResult = result),
       onSnackBarMessage: _showSnackBar,
       isProxyRunning: _serviceManager.isProxyRunning,
-      enableSystemDnsFallback: _enableSystemDnsFallback,
     );
 
     _advancedTests = AdvancedTests(
@@ -133,7 +134,7 @@ class _MyHomePageState extends State<MyHomePage> {
   /// 添加日志消息
   void _addLogMessage(String message) {
     setState(() {
-      _logMessages =
+      _logMessages = 
           '${DateTime.now().toString().substring(11, 19)} $message\n$_logMessages';
     });
     // 滚动到最新日志
@@ -151,7 +152,7 @@ class _MyHomePageState extends State<MyHomePage> {
   /// 添加日志分割线
   void _addLogDivider() {
     setState(() {
-      _logMessages =
+      _logMessages = 
           '${DateTime.now().toString().substring(11, 19)} ========================================\n$_logMessages';
     });
     // 滚动到最新日志
@@ -197,9 +198,24 @@ class _MyHomePageState extends State<MyHomePage> {
     await _serviceManager.stopProxy();
   }
 
-  /// 清除缓存
-  void _clearCache() {
-    _serviceManager.clearCache();
+  /// 清除所有缓存
+  Future<void> _clearAllCache() async {
+    _hostInputController.clear();
+    await _serviceManager.clearCache();
+  }
+
+  /// 清除指定域名缓存
+  Future<void> _clearHostsCache() async {
+    final hosts = _hostInputController.text
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (hosts.isEmpty) {
+      _showSnackBar('请输入要清除缓存的域名');
+      return;
+    }
+    await _serviceManager.clearCache(hosts);
   }
 
   /// 切换系统DNS回退
@@ -214,6 +230,7 @@ class _MyHomePageState extends State<MyHomePage> {
     setState(() {
       _enableCache = value;
     });
+    _serviceManager.setEnableCache(value);
   }
 
   /// 切换测速启用
@@ -231,7 +248,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _currentTestType = 'Domain';
     });
     _addLogDivider();
-    await _basicTests.testDomainResolution();
+    await _basicTests.testDomainResolution(enableSystemDnsFallback: _enableSystemDnsFallback);
     setState(() {
       _currentTestResult = _resolutionResult;
     });
@@ -270,6 +287,38 @@ class _MyHomePageState extends State<MyHomePage> {
     // 确保结果被正确更新
     setState(() {
       _currentTestResult = _dioResult;
+    });
+  }
+
+  /// 测试系统DNS回退
+  Future<void> _testSystemDnsFallback() async {
+    setState(() {
+      _currentTestTitle = '系统DNS回退测试结果';
+      _currentTestResult = '正在测试...';
+      _currentTestType = 'SystemDnsFallback';
+    });
+
+    _addLogDivider();
+    await SystemDnsFallbackTest.runTest(enableSystemDnsFallback: _enableSystemDnsFallback);
+    
+    setState(() {
+      _currentTestResult = '系统DNS回退测试完成，请查看控制台输出';
+    });
+  }
+
+  /// 测试缓存功能
+  Future<void> _testCacheFunctionality() async {
+    setState(() {
+      _currentTestTitle = '缓存功能测试结果';
+      _currentTestResult = '正在测试...';
+      _currentTestType = 'CacheFunctionality';
+    });
+
+    _addLogDivider();
+    await CacheFunctionalityTest.runTest();
+    
+    setState(() {
+      _currentTestResult = '缓存功能测试完成，请查看控制台输出';
     });
   }
 
@@ -381,10 +430,12 @@ class _MyHomePageState extends State<MyHomePage> {
               enableSystemDnsFallback: _enableSystemDnsFallback,
               enableCache: _enableCache,
               enableSpeedTest: _enableSpeedTest,
+              hostInputController: _hostInputController,
               onInitializeDns: _initializeDns,
               onStartProxy: _startProxy,
               onStopProxy: _stopProxy,
-              onClearCache: _clearCache,
+              onClearAllCache: _clearAllCache,
+              onClearHostsCache: _clearHostsCache,
               onSystemDnsFallbackChanged: _toggleSystemDnsFallback,
               onCacheChanged: _toggleCache,
               onSpeedTestChanged: _toggleSpeedTest,
@@ -397,6 +448,8 @@ class _MyHomePageState extends State<MyHomePage> {
               onTestDomainResolution: _testDomainResolution,
               onTestHttpClient: _testHttpClient,
               onTestDio: _testDio,
+              onTestSystemDnsFallback: _testSystemDnsFallback,
+              onTestCacheFunctionality: _testCacheFunctionality,
             ),
             const SizedBox(height: 16),
 
@@ -587,6 +640,7 @@ class _MyHomePageState extends State<MyHomePage> {
   void dispose() {
     _serviceManager.dispose();
     _logScrollController.dispose();
+    _hostInputController.dispose();
     super.dispose();
   }
 }
