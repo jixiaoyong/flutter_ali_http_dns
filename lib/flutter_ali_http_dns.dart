@@ -304,32 +304,6 @@ class FlutterAliHttpDns {
     return await PortUtils.isPortAvailable(port);
   }
 
-  /// 注册端口监听（动态添加端口）
-  ///
-  /// [port] 要监听的端口
-  /// 返回注册是否成功
-  Future<bool> registerPort(int port) async {
-    if (!_isProxyRunning || _proxyServer == null) {
-      Logger.error('Proxy server not running. Call startProxy() first.');
-      return false;
-    }
-
-    return await _proxyServer!.registerPort(port);
-  }
-
-  /// 取消注册端口监听（动态移除端口）
-  ///
-  /// [port] 要取消监听的端口
-  /// 返回取消注册是否成功
-  Future<bool> deregisterPort(int port) async {
-    if (!_isProxyRunning || _proxyServer == null) {
-      Logger.error('Proxy server not running. Call startProxy() first.');
-      return false;
-    }
-
-    return await _proxyServer!.deregisterPort(port);
-  }
-
   /// 获取代理配置字符串
   ///
   /// 返回用于 HttpClient 配置的代理字符串
@@ -415,17 +389,17 @@ class FlutterAliHttpDns {
 
     try {
       Logger.info('Clearing DNS cache for: ${hostNames ?? 'all hosts'}');
-      
+
       // 调用平台方法清除缓存
       final platformResult = await _platform.clearCache(hostNames);
-      
+
       // 同时清除本地DNS解析器缓存
       if (hostNames == null || hostNames.isEmpty) {
         _dnsResolver.clearCache();
       } else {
         _dnsResolver.clearHosts(hostNames);
       }
-      
+
       Logger.info('DNS cache cleared successfully');
       return platformResult;
     } catch (e) {

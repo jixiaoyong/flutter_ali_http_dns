@@ -2,6 +2,8 @@
 
 一个基于[阿里云 HTTPDNS](https://help.aliyun.com/zh/dns/httpdns-what-is-mobile-resolution-httpdns)的 Flutter 插件，提供智能域名解析和代理功能，支持 HTTP/1.1 和 HTTP/2 协议。
 
+代码参考了[Flutter接入移动解析HTTPDNS Android/iOS SDK实践方案](https://help.aliyun.com/zh/dns/httpdns-practice-solution-of-connecting-flutter-to-alibaba-cloud-public-dns-android-ios-sdk)
+
 支持平台： Android、iOS
 
 支持解析域名对应的 IP,也支持代理网络请求并解析域名。
@@ -574,7 +576,7 @@ for (final domain in domains) {
 Future<bool> initialize(DnsConfig config)
 
 // 启动代理服务器
-Future<bool> startProxy([ProxyConfig? config])
+Future<bool> startProxy({ProxyConfig config = const ProxyConfig()})
 
 // 停止代理服务器
 Future<bool> stopProxy()
@@ -600,16 +602,6 @@ Future<void> setEnableCache(bool enable)
 Future<bool> clearCache([List<String>? hostNames])
 ```
 
-#### 缓存管理
-
-```dart
-// 动态开启或关闭原生SDK的缓存功能。此设置在服务初始化后依然可以随时修改。
-Future<void> setEnableCache(bool enable)
-
-// 清除缓存。不带参数时，清除所有域名的缓存；带参数时，清除指定域名列表的缓存。
-Future<bool> clearCache([List<String>? hostNames])
-```
-
 #### 代理管理
 
 ```dart
@@ -618,6 +610,12 @@ Future<String?> getProxyAddress()
 
 // 获取HTTP/2代理地址
 Future<String?> getHttp2ProxyAddress()
+
+// 获取所有代理地址列表
+Future<List<String>> getAllProxyAddresses()
+
+// 获取代理配置字符串
+Future<String?> getProxyConfigString()
 
 // 获取Dio客户端所需的代理配置
 Future<Map<String, dynamic>?> getDioProxyConfig()
@@ -629,15 +627,53 @@ Future<bool> checkProxyStatus()
 #### 端口管理
 
 ```dart
+// 获取主要端口（第一个端口）
 Future<int?> getMainPort()
+
+// 获取实际使用的端口列表
 Future<List<int>> getActualPorts()
+
+// 检查端口是否可用
 Future<bool> isPortAvailable(int port)
+
+
 ```
 
 #### 客户端配置
 
 ```dart
+// 为 HttpClient 配置代理
 Future<bool> configureHttpClient(HttpClient client)
+```
+
+#### 状态查询
+
+```dart
+// 检查是否已初始化
+bool get isInitialized
+
+// 检查代理是否正在运行
+bool get isProxyRunning
+
+// 获取当前代理服务器实例
+ProxyServer? get currentProxyServer
+```
+
+#### 日志管理
+
+```dart
+// 设置日志级别
+static void setLogLevel(LogLevel level)
+
+// 启用或禁用日志
+static void setLogEnabled(bool enabled)
+```
+
+#### 资源管理
+
+```dart
+// 清理资源（停止代理服务器并清理相关资源）
+Future<void> dispose()
 ```
 
 ## 工作原理

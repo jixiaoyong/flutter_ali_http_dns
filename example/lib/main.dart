@@ -65,6 +65,9 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // BottomSheet可见性
   bool _isBottomSheetVisible = true; // 默认显示
+  
+  // 网络状态浮窗可见性
+  bool _isNetworkStatusVisible = true; // 默认显示
 
   @override
   void initState() {
@@ -386,6 +389,13 @@ class _MyHomePageState extends State<MyHomePage> {
     }
   }
 
+  /// 切换网络状态浮窗可见性
+  void _toggleNetworkStatusVisibility() {
+    setState(() {
+      _isNetworkStatusVisible = !_isNetworkStatusVisible;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -394,6 +404,11 @@ class _MyHomePageState extends State<MyHomePage> {
         title: Text(widget.title),
         elevation: 2,
         actions: [
+          IconButton(
+            icon: Icon(_isNetworkStatusVisible ? Icons.wifi_off : Icons.wifi),
+            onPressed: _toggleNetworkStatusVisibility,
+            tooltip: _isNetworkStatusVisible ? '隐藏网络状态' : '显示网络状态',
+          ),
           IconButton(
             icon: const Icon(Icons.keyboard_arrow_down),
             onPressed: () {
@@ -405,7 +420,9 @@ class _MyHomePageState extends State<MyHomePage> {
           ),
         ],
       ),
-      body: SingleChildScrollView(
+      body: Stack(
+        children: [
+          SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -466,6 +483,14 @@ class _MyHomePageState extends State<MyHomePage> {
             )
           ],
         ),
+          ),
+          
+          // 网络状态浮窗
+          NetworkStatusWidget(
+            isVisible: _isNetworkStatusVisible,
+            onToggleVisibility: _toggleNetworkStatusVisibility,
+          ),
+        ],
       ),
       bottomSheet: _isBottomSheetVisible
           ? Container(

@@ -14,6 +14,9 @@ A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support
   s.author           = { 'Your Company' => 'email@example.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*.{h,m}'
+  s.resource_bundles = {
+    'flutter_ali_http_dns' => ['Info.plist']
+  }
   s.dependency 'Flutter'
   s.platform = :ios, '12.0'
 
@@ -38,5 +41,12 @@ A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support
   # 用户目标的 xcconfig 设置，处理模拟器兼容性
   s.user_target_xcconfig = {
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64'
+  }
+  
+  # 声明插件需要的权限
+  s.info_plist = {
+    'NSAppTransportSecurity' => {
+      'NSAllowsArbitraryLoads' => true
+    }
   }
 end
