@@ -13,7 +13,9 @@ class DiagnosticTools {
   ];
 
   /// 运行完整诊断
-  static Future<Map<String, dynamic>> runFullDiagnostic() async {
+  static Future<Map<String, dynamic>> runFullDiagnostic({
+    Function(String)? onSnackBarMessage,
+  }) async {
     final results = <String, dynamic>{};
     
     // 1. 检查认证信息
@@ -26,7 +28,7 @@ class DiagnosticTools {
     results['systemDns'] = await _checkSystemDns();
     
     // 4. 检查HTTP DNS服务
-    results['httpDns'] = await _checkHttpDns();
+    results['httpDns'] = await _checkHttpDns(onSnackBarMessage: onSnackBarMessage);
     
     return results;
   }
@@ -135,7 +137,9 @@ class DiagnosticTools {
   }
 
   /// 检查HTTP DNS服务
-  static Future<Map<String, dynamic>> _checkHttpDns() async {
+  static Future<Map<String, dynamic>> _checkHttpDns({
+    Function(String)? onSnackBarMessage,
+  }) async {
     final result = <String, dynamic>{};
     
     try {
@@ -143,7 +147,7 @@ class DiagnosticTools {
       final dnsService = FlutterAliHttpDns();
       
       // 配置
-      final config = DnsConfig(
+      const config = DnsConfig(
         accountId: AliHttpDnsCredentials.accountId,
         accessKeyId: AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: AliHttpDnsCredentials.accessKeySecret,
@@ -186,6 +190,7 @@ class DiagnosticTools {
         
         // 清理资源
         await dnsService.dispose();
+        onSnackBarMessage?.call('诊断工具已关闭DNS服务：诊断测试完成，自动清理资源');
       } else {
         result['overall'] = false;
         result['error'] = 'DNS服务初始化失败';

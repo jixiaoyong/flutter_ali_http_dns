@@ -11,7 +11,7 @@ class QuickTest {
         accountId: 'test',
         accessKeyId: 'test',
         accessKeySecret: 'test',
-        enableCache: true,
+        enableCache: false,
         maxCacheSize: 100,
         maxCacheTTL: 300,
         preloadDomains: [],

@@ -125,10 +125,9 @@
 - **HTTPDNS 解析**: 通过阿里云 HTTPDNS 服务解析域名，提升解析速度和准确性
 - **智能代理**: 自动启动本地代理服务器，支持 HTTP/1.1 和 HTTP/2 协议
 - **端口管理**: 智能端口分配和冲突处理，无需手动管理
-- **多客户端支持**: 完美支持 Dio、HttpClient 等主流 HTTP 客户端，支持 HTTP/1.1 和 HTTP/2 协议
-- **缓存优化**: 内置 DNS 缓存机制，提升性能
-- **错误处理**: 完善的错误处理和回退机制，返回布尔值或空值而非抛出异常
-- **API 简洁**: 提供简洁易用的公共 API，隐藏内部实现细节
+- **多客户端支持**: 支持 Dio、HttpClient 等主流 HTTP 客户端，支持 HTTP/1.1 和 HTTP/2 协议
+- **智能缓存**: 独立的缓存管理器，支持动态启用/禁用缓存，提升性能
+
 
 ## 快速开始
 
@@ -337,6 +336,29 @@ final dnsConfig = DnsConfig(
 );
 
 await dnsService.initialize(dnsConfig);
+```
+
+### 4. 智能缓存管理
+
+插件提供了独立的缓存管理器，支持动态缓存控制：
+
+```dart
+// 检查缓存状态
+bool isEnabled = dnsService.isCacheEnabled;
+int currentSize = dnsService.cacheSize;
+int maxSize = dnsService.maxCacheSize;
+
+// 动态切换缓存状态
+await dnsService.setEnableCache(false);  // 禁用缓存
+await dnsService.setEnableCache(true);   // 启用缓存
+
+// 清除缓存
+await dnsService.clearCache();                    // 清除所有缓存
+await dnsService.clearCache(['example.com']);     // 清除指定域名缓存
+
+// 缓存状态监控
+print('缓存状态: ${dnsService.isCacheEnabled ? "启用" : "禁用"}');
+print('缓存使用: ${dnsService.cacheSize}/${dnsService.maxCacheSize}');
 ```
 
 ## 高级功能
@@ -595,11 +617,20 @@ Future<String?> resolveDomainNullable(String domain, {bool enableSystemDnsFallba
 #### 缓存管理
 
 ```dart
-// 动态开启或关闭原生SDK的缓存功能。此设置在服务初始化后依然可以随时修改。
+// 动态开启或关闭缓存功能。此设置在服务初始化后依然可以随时修改。
 Future<void> setEnableCache(bool enable)
 
 // 清除缓存。不带参数时，清除所有域名的缓存；带参数时，清除指定域名列表的缓存。
 Future<bool> clearCache([List<String>? hostNames])
+
+// 检查缓存是否启用
+bool get isCacheEnabled
+
+// 获取当前缓存大小
+int get cacheSize
+
+// 获取最大缓存大小
+int get maxCacheSize
 ```
 
 #### 代理管理

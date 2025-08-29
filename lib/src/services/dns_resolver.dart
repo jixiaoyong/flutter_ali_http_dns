@@ -1,26 +1,30 @@
 import 'dart:io';
 import '../../flutter_ali_http_dns.dart';
 import '../../flutter_ali_http_dns_platform_interface.dart';
+import 'cache_manager.dart';
 
 /// DNS 解析器服务
 class DnsResolver {
-  DnsConfig? _config;
-  final Map<String, String> _cache = {};
-  final Map<String, DateTime> _cacheExpiry = {};
-  final Map<String, int> _retryCount = {};
+  bool _isInitialized = false;
+  List<String> _preloadDomains = [];
   static const int _maxRetries = 2;
   static const Duration _retryDelay = Duration(milliseconds: 500);
 
+  // 缓存管理器
+  final CacheManager _cacheManager = CacheManager.instance;
+
   /// 初始化解析器
   Future<void> initialize(DnsConfig config) async {
-    _config = config;
+    _isInitialized = true;
+    _preloadDomains = List.from(config.preloadDomains);
+
     Logger.info(
         'DnsResolver initialized with cache size: ${config.maxCacheSize}');
 
     // 预加载域名
-    if (config.preloadDomains.isNotEmpty) {
-      Logger.info('Preloading domains: ${config.preloadDomains}');
-      for (final domain in config.preloadDomains) {
+    if (_preloadDomains.isNotEmpty) {
+      Logger.info('Preloading domains: $_preloadDomains');
+      for (final domain in _preloadDomains) {
         final result = await resolve(domain, enableSystemDnsFallback: false);
         if (result != null) {
           Logger.debug('Preloaded domain: $domain -> $result');
@@ -38,28 +42,23 @@ class DnsResolver {
   /// 返回解析后的 IP 地址，如果解析失败则返回 null
   Future<String?> resolve(String domain,
       {bool enableSystemDnsFallback = true}) async {
-    if (_config == null) {
+    if (!_isInitialized) {
       Logger.error('DnsResolver not initialized');
       return null;
     }
 
-    // 检查缓存
-    if (_config!.enableCache) {
-      final cachedIp = _getCachedIp(domain);
-      if (cachedIp != null) {
-        Logger.debug('Domain resolved from cache: $domain -> $cachedIp');
-        return cachedIp;
-      }
+    // 检查缓存 - 使用缓存管理器
+    final cachedIp = _cacheManager.getCachedIp(domain);
+    if (cachedIp != null) {
+      return cachedIp;
     }
 
     // 尝试HTTPDNS解析，带重试机制
     String? ip = await _resolveWithRetry(domain);
 
     if (ip != null && ip.isNotEmpty) {
-      // 缓存结果
-      if (_config!.enableCache) {
-        _cacheIp(domain, ip);
-      }
+      // 缓存结果 - 使用缓存管理器
+      _cacheManager.cacheIp(domain, ip);
       Logger.info('Domain resolved successfully via HTTPDNS: $domain -> $ip');
       return ip;
     }
@@ -78,7 +77,7 @@ class DnsResolver {
 
   /// 带重试机制的HTTPDNS解析
   Future<String?> _resolveWithRetry(String domain) async {
-    int retryCount = _retryCount[domain] ?? 0;
+    int retryCount = _cacheManager.getRetryCount(domain);
 
     for (int attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
@@ -91,7 +90,7 @@ class DnsResolver {
 
         if (ip != null && ip.isNotEmpty) {
           // 成功解析，重置重试计数
-          _retryCount.remove(domain);
+          _cacheManager.removeRetryCount(domain);
           return ip;
         } else {
           Logger.debug(
@@ -109,7 +108,7 @@ class DnsResolver {
     }
 
     // 所有重试都失败了
-    _retryCount[domain] = retryCount + 1;
+    _cacheManager.setRetryCount(domain, retryCount + 1);
     Logger.warning(
         'All HTTPDNS resolution attempts failed for domain: $domain');
     return null;
@@ -126,9 +125,7 @@ class DnsResolver {
 
       if (addresses.isNotEmpty) {
         final ip = addresses.first.address;
-        if (_config!.enableCache) {
-          _cacheIp(domain, ip);
-        }
+        _cacheManager.cacheIp(domain, ip);
         Logger.info(
             'Domain resolved successfully via system DNS: $domain -> $ip');
         return ip;
@@ -139,70 +136,5 @@ class DnsResolver {
 
     Logger.warning('All DNS resolution failed, returning null: $domain');
     return null;
-  }
-
-  /// 从缓存获取 IP
-  String? _getCachedIp(String domain) {
-    final expiry = _cacheExpiry[domain];
-    if (expiry != null && DateTime.now().isBefore(expiry)) {
-      return _cache[domain];
-    }
-
-    // 清理过期缓存
-    _cache.remove(domain);
-    _cacheExpiry.remove(domain);
-    return null;
-  }
-
-  /// 缓存 IP 地址
-  void _cacheIp(String domain, String ip) {
-    if (_cache.length >= _config!.maxCacheSize) {
-      // 清理最旧的缓存
-      final oldestDomain = _cacheExpiry.entries
-          .reduce((a, b) => a.value.isBefore(b.value) ? a : b)
-          .key;
-      _cache.remove(oldestDomain);
-      _cacheExpiry.remove(oldestDomain);
-      Logger.debug('Cleared oldest cache entry: $oldestDomain');
-    }
-
-    _cache[domain] = ip;
-    _cacheExpiry[domain] = DateTime.now().add(
-      Duration(seconds: _config!.maxCacheTTL),
-    );
-    Logger.debug('Cached IP: $domain -> $ip (TTL: ${_config!.maxCacheTTL}s)');
-  }
-
-  /// 清除所有缓存
-  void clearCache() {
-    final size = _cache.length;
-    _cache.clear();
-    _cacheExpiry.clear();
-    _retryCount.clear();
-    Logger.info('Cache cleared, removed $size entries');
-  }
-
-  /// 清除指定域名的缓存
-  void clearHosts(List<String> hostNames) {
-    int count = 0;
-    for (final domain in hostNames) {
-      if (_cache.containsKey(domain)) {
-        _cache.remove(domain);
-        _cacheExpiry.remove(domain);
-        _retryCount.remove(domain);
-        count++;
-      }
-    }
-    Logger.info('Cleared $count specific hosts from cache: $hostNames');
-  }
-
-  /// 获取缓存统计信息
-  Map<String, dynamic> getCacheStats() {
-    return {
-      'size': _cache.length,
-      'maxSize': _config?.maxCacheSize ?? 0,
-      'domains': _cache.keys.toList(),
-      'retryCount': _retryCount,
-    };
   }
 }

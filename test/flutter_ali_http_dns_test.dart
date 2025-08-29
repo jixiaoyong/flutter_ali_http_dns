@@ -21,7 +21,7 @@ void main() {
 
     test('should create DnsConfig with default and custom values', () {
       // 测试默认配置
-      final defaultConfig = DnsConfig(
+      const defaultConfig = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
@@ -33,7 +33,7 @@ void main() {
       expect(defaultConfig.preloadDomains, isEmpty);
 
       // 测试自定义配置
-      final customConfig = DnsConfig(
+      const customConfig = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
@@ -51,13 +51,13 @@ void main() {
 
     test('should create ProxyConfig with default and custom values', () {
       // 测试默认配置
-      final defaultConfig = ProxyConfig();
+      const defaultConfig = ProxyConfig();
       expect(defaultConfig.portPool, isNull);
       expect(defaultConfig.enabled, isTrue);
       expect(defaultConfig.host, equals('localhost'));
 
       // 测试自定义配置
-      final customConfig = ProxyConfig(
+      const customConfig = ProxyConfig(
         portPool: [4041, 4042],
         enabled: false,
         host: '127.0.0.1',
@@ -69,7 +69,7 @@ void main() {
 
     test('should handle JSON serialization and deserialization', () {
       // 测试 DnsConfig JSON 序列化
-      final dnsConfig = DnsConfig(
+      const dnsConfig = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
@@ -83,7 +83,7 @@ void main() {
       expect(dnsConfigFromJson.enableCache, isFalse);
 
       // 测试 ProxyConfig JSON 序列化
-      final proxyConfig = ProxyConfig(
+      const proxyConfig = ProxyConfig(
         portPool: [4041, 4042],
         enabled: false,
         host: '127.0.0.1',
@@ -96,13 +96,13 @@ void main() {
     });
 
     test('should handle config equality', () {
-      final config1 = DnsConfig(
+      const config1 = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       );
       
-      final config2 = DnsConfig(
+      const config2 = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
@@ -113,13 +113,13 @@ void main() {
     });
 
     test('should handle proxy config equality', () {
-      final config1 = ProxyConfig(
+      const config1 = ProxyConfig(
         portPool: [4041, 4042],
         enabled: false,
         host: '127.0.0.1',
       );
 
-      final config2 = ProxyConfig(
+      const config2 = ProxyConfig(
         portPool: [4041, 4042],
         enabled: false,
         host: '127.0.0.1',

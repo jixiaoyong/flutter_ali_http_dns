@@ -1,12 +1,9 @@
-import 'package:flutter/material.dart';
 import 'package:flutter_ali_http_dns/flutter_ali_http_dns.dart';
 import 'package:flutter_ali_http_dns_example/credentials.dart';
 
 /// 服务管理器 - 负责DNS和代理服务的初始化和管理
 class ServiceManager {
   final FlutterAliHttpDns _dnsService = FlutterAliHttpDns();
-  bool _isInitialized = false;
-  bool _isProxyRunning = false;
   String _proxyAddress = '';
   String _initializationStatus = '未初始化';
   String _lastError = '';
@@ -15,18 +12,16 @@ class ServiceManager {
   // 回调函数
   final Function(String) onLogMessage;
   final Function(String) onSnackBarMessage;
-  final VoidCallback onStateChanged;
 
   ServiceManager({
     required this.onLogMessage,
     required this.onSnackBarMessage,
-    required this.onStateChanged,
   });
 
   // Getters
   FlutterAliHttpDns get dnsService => _dnsService;
-  bool get isInitialized => _isInitialized;
-  bool get isProxyRunning => _isProxyRunning;
+  bool get isInitialized => _dnsService.isInitialized;
+  bool get isProxyRunning => _dnsService.isProxyRunning;
   String get proxyAddress => _proxyAddress;
   String get initializationStatus => _initializationStatus;
   String get lastError => _lastError;
@@ -58,19 +53,16 @@ class ServiceManager {
   Future<void> initializeDns({required bool enableCache, required bool enableSpeedTest}) async {
     try {
       _initializationStatus = '初始化中...';
-      onStateChanged();
       
       // 验证认证信息
       if (AliHttpDnsCredentials.accountId.isEmpty || 
           AliHttpDnsCredentials.accessKeyId.isEmpty || 
           AliHttpDnsCredentials.accessKeySecret.isEmpty) {
-        _isInitialized = false;
         _initializationStatus = '认证信息错误';
         _lastError = '认证信息未完整配置';
         
         onLogMessage('认证信息验证失败: 认证信息未完整配置');
         onSnackBarMessage('认证信息配置错误');
-        onStateChanged();
         throw Exception('认证信息未完整配置');
       }
       
@@ -85,7 +77,6 @@ class ServiceManager {
       final success = await _dnsService.initialize(config);
       
       if (success) {
-        _isInitialized = true;
         _initializationStatus = '已初始化';
         _lastInitializationTime = DateTime.now();
         _lastError = '';
@@ -93,32 +84,27 @@ class ServiceManager {
         onLogMessage('DNS 服务初始化成功');
         onLogMessage('初始化时间: ${_lastInitializationTime!.toString().substring(0, 19)}');
         onSnackBarMessage('DNS 服务初始化成功');
-        onStateChanged();
       } else {
-        _isInitialized = false;
         _initializationStatus = '初始化失败';
         _lastError = 'DNS服务初始化返回失败';
         
         onLogMessage('DNS 服务初始化失败: 返回false');
         onSnackBarMessage('DNS 服务初始化失败');
-        onStateChanged();
         throw Exception('DNS服务初始化失败');
       }
     } catch (e) {
-      _isInitialized = false;
       _initializationStatus = '初始化失败';
       _lastError = e.toString();
       
       onLogMessage('DNS 服务初始化失败: $e');
       onSnackBarMessage('DNS 服务初始化失败: $e');
-      onStateChanged();
       rethrow;
     }
   }
 
   /// 启动代理服务器
   Future<void> startProxy() async {
-    if (!_isInitialized) {
+    if (!_dnsService.isInitialized) {
       onSnackBarMessage('请先初始化 DNS 服务');
       return;
     }
@@ -131,13 +117,11 @@ class ServiceManager {
 
       if (success) {
         final addresses = await _dnsService.getAllProxyAddresses();
-        _isProxyRunning = true;
         _proxyAddress = addresses.isNotEmpty ? addresses.join(', ') : 'Unknown';
         
         onLogMessage('智能代理服务器启动成功');
         onLogMessage('代理地址: $_proxyAddress');
         onSnackBarMessage('智能代理服务器启动成功');
-        onStateChanged();
       } else {
         onLogMessage('智能代理服务器启动失败');
         onSnackBarMessage('智能代理服务器启动失败');
@@ -155,7 +139,6 @@ class ServiceManager {
       onLogMessage('开始停止智能代理服务器...');
       
       final success = await _dnsService.stopProxy();
-      _isProxyRunning = false;
       _proxyAddress = '';
       
       if (success) {
@@ -165,7 +148,6 @@ class ServiceManager {
         onLogMessage('智能代理服务器停止失败');
         onSnackBarMessage('智能代理服务器停止失败');
       }
-      onStateChanged();
     } catch (e) {
       onLogMessage('智能代理服务器停止错误: $e');
       onSnackBarMessage('智能代理服务器停止错误: $e');
@@ -176,7 +158,7 @@ class ServiceManager {
   /// 清除缓存
   Future<void> clearCache([List<String>? hostNames]) async {
     try {
-      if (!_isInitialized) {
+      if (!_dnsService.isInitialized) {
         onLogMessage('DNS服务未初始化，无法清除缓存');
         onSnackBarMessage('请先初始化DNS服务');
         return;
@@ -191,7 +173,6 @@ class ServiceManager {
       if (success) {
         onLogMessage('${cacheType}DNS缓存清除成功');
         onSnackBarMessage('${cacheType}DNS缓存清除成功');
-        onStateChanged();
       } else {
         onLogMessage('${cacheType}DNS缓存清除失败');
         onSnackBarMessage('${cacheType}DNS缓存清除失败');
@@ -205,7 +186,7 @@ class ServiceManager {
   /// 动态设置是否启用缓存
   Future<void> setEnableCache(bool enable) async {
     try {
-      if (!_isInitialized) {
+      if (!_dnsService.isInitialized) {
         onLogMessage('DNS服务未初始化，无法设置缓存状态');
         onSnackBarMessage('请先初始化DNS服务');
         return;
@@ -220,7 +201,27 @@ class ServiceManager {
   }
 
   /// 释放资源
-  void dispose() {
-    _dnsService.dispose();
+  Future<void> dispose() async {
+    await _dnsService.dispose();
+    _proxyAddress = '';
+    _initializationStatus = '未初始化';
+    _lastError = '';
+    _lastInitializationTime = null;
+    onSnackBarMessage('服务管理器已关闭DNS服务：应用退出，自动清理资源');
+  }
+
+  /// 同步状态
+  /// 从SDK获取最新状态并更新本地状态
+  void syncStatus() {
+    // 根据SDK状态更新本地状态
+    if (!_dnsService.isInitialized) {
+      _initializationStatus = '未初始化';
+      _lastError = '';
+      _lastInitializationTime = null;
+    }
+    
+    if (!_dnsService.isProxyRunning) {
+      _proxyAddress = '';
+    }
   }
 }

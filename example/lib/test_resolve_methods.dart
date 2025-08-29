@@ -11,7 +11,7 @@ class ResolveMethodsTest {
         accountId: 'test',
         accessKeyId: 'test',
         accessKeySecret: 'test',
-        enableCache: true,
+        enableCache: false,
         maxCacheSize: 100,
         enableSpeedTest: true,
         preloadDomains: [],

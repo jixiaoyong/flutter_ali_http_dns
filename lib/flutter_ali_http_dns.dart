@@ -6,6 +6,7 @@ import 'src/models/dns_config.dart';
 import 'src/models/proxy_config.dart';
 import 'src/services/dns_resolver.dart';
 import 'src/services/proxy_server.dart';
+import 'src/services/cache_manager.dart';
 import 'src/utils/logger.dart';
 import 'src/utils/port_utils.dart';
 
@@ -40,6 +41,25 @@ class FlutterAliHttpDns {
   /// 检查代理是否正在运行
   bool get isProxyRunning => _isProxyRunning;
 
+  /// 检查缓存是否已启用
+  bool get isCacheEnabled => CacheManager.instance.isEnabled;
+
+  /// 获取缓存大小
+  int get cacheSize {
+    if (!_isInitialized) {
+      return 0;
+    }
+    return CacheManager.instance.getCacheStats()['size'] as int? ?? 0;
+  }
+
+  /// 获取最大缓存大小
+  int get maxCacheSize {
+    if (!_isInitialized) {
+      return 0;
+    }
+    return CacheManager.instance.getCacheStats()['maxSize'] as int? ?? 0;
+  }
+
   /// 设置日志级别
   static void setLogLevel(LogLevel level) {
     Logger.setLevel(level);
@@ -68,8 +88,16 @@ class FlutterAliHttpDns {
 
       if (result) {
         _isInitialized = true;
+        
+        // 配置缓存管理器
+        CacheManager.instance.configure(
+          maxCacheSize: config.maxCacheSize,
+          maxCacheTTL: config.maxCacheTTL,
+        );
+        CacheManager.instance.setEnabled(config.enableCache);
+        
         await _dnsResolver.initialize(config);
-        Logger.info('DNS service initialized successfully');
+        Logger.info('DNS service initialized successfully with cache ${config.enableCache ? 'enabled' : 'disabled'}');
       } else {
         Logger.error('Failed to initialize DNS service');
       }
@@ -124,6 +152,8 @@ class FlutterAliHttpDns {
       return;
     }
     await _platform.setEnableCache(enable);
+    CacheManager.instance.setEnabled(enable);
+    Logger.info('Cache ${enable ? 'enabled' : 'disabled'} successfully');
   }
 
   /// 启动代理服务器
@@ -393,11 +423,11 @@ class FlutterAliHttpDns {
       // 调用平台方法清除缓存
       final platformResult = await _platform.clearCache(hostNames);
 
-      // 同时清除本地DNS解析器缓存
+      // 直接清除本地缓存
       if (hostNames == null || hostNames.isEmpty) {
-        _dnsResolver.clearCache();
+        CacheManager.instance.clearCache();
       } else {
-        _dnsResolver.clearHosts(hostNames);
+        CacheManager.instance.clearHosts(hostNames);
       }
 
       Logger.info('DNS cache cleared successfully');
@@ -452,7 +482,6 @@ class FlutterAliHttpDns {
             'Invalid port range: startPort ($startPort) and endPort ($endPort) must be valid and endPort must be greater than startPort');
         return false;
       }
-      Logger.info('Port range validation passed');
 
       Logger.info('Proxy configuration validation completed successfully');
       return true;

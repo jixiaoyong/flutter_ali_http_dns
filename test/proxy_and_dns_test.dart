@@ -11,7 +11,7 @@ void main() {
 
   group('DnsResolver Tests', () {
     late DnsResolver dnsResolver;
-    final dnsConfig = DnsConfig(
+    const dnsConfig = DnsConfig(
       accountId: credentials.AliHttpDnsCredentials.accountId,
       accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
       accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
@@ -36,30 +36,6 @@ void main() {
       expect(ip != 'example.com', isTrue); // 应该解析为 IP 地址
     });
 
-    test('should handle cache operations', () {
-      // 测试缓存统计
-      final stats = dnsResolver.getCacheStats();
-      expect(stats, isA<Map<String, dynamic>>());
-      expect(stats['size'], isA<int>());
-      expect(stats['maxSize'], isA<int>());
-    });
-
-    test('should clear cache properly', () async {
-      // 先解析一个域名
-      await dnsResolver.resolveWithSystemDns('example.com');
-
-      // 检查缓存统计
-      final stats = dnsResolver.getCacheStats();
-      expect(stats['size'], greaterThan(0));
-
-      // 清理缓存
-      dnsResolver.clearCache();
-
-      // 再次检查缓存统计
-      final newStats = dnsResolver.getCacheStats();
-      expect(newStats['size'], 0);
-    });
-
     test('should handle network unavailability gracefully', () async {
       // 测试网络不可用的情况
       // 这里我们通过解析一个不存在的域名来模拟网络问题
@@ -73,7 +49,7 @@ void main() {
 
   group('ProxyServer Basic Tests', () {
     test('should create proxy server with config', () {
-      final config = ProxyConfig(portPool: [4041]);
+      const config = ProxyConfig(portPool: [4041]);
       final dnsResolver = DnsResolver();
       final proxyServer = ProxyServer(
         config: config,
@@ -85,7 +61,7 @@ void main() {
     });
 
     test('should get listening ports', () {
-      final config = ProxyConfig(portPool: [4041, 4042]);
+      const config = ProxyConfig(portPool: [4041, 4042]);
       final dnsResolver = DnsResolver();
       final proxyServer = ProxyServer(
         config: config,
@@ -97,7 +73,7 @@ void main() {
     });
 
     test('should check if port is listening', () {
-      final config = ProxyConfig(portPool: [4041]);
+      const config = ProxyConfig(portPool: [4041]);
       final dnsResolver = DnsResolver();
       final proxyServer = ProxyServer(
         config: config,
@@ -111,7 +87,7 @@ void main() {
 
   group('Configuration Tests', () {
     test('should create valid DnsConfig', () {
-      final config = DnsConfig(
+      const config = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
@@ -119,13 +95,14 @@ void main() {
         maxCacheSize: 100,
       );
 
-      expect(config.accountId, equals(credentials.AliHttpDnsCredentials.accountId));
+      expect(config.accountId,
+          equals(credentials.AliHttpDnsCredentials.accountId));
       expect(config.enableCache, isTrue);
       expect(config.maxCacheSize, equals(100));
     });
 
     test('should create valid ProxyConfig', () {
-      final config = ProxyConfig(
+      const config = ProxyConfig(
         portPool: [4041, 4042],
         enabled: true,
         host: 'localhost',

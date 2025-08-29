@@ -2,7 +2,7 @@
 // 此文件包含非敏感的配置信息，可以被 git 追踪
 class AliHttpDnsConfig {
   // 其他可选配置
-  static const bool enableCache = true;
+  static const bool enableCache = false;
   static const int maxCacheSize = 100;
   static const bool enableIPv6 = false;
   static const bool enableSpeedTest = true;

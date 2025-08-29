@@ -48,8 +48,8 @@ class _MyHomePageState extends State<MyHomePage> {
   String _logMessages = '';
 
   // 配置选项
-  bool _enableSystemDnsFallback = true;
-  bool _enableCache = true;
+  bool _enableSystemDnsFallback = false;
+  bool _enableCache = false;
   bool _enableSpeedTest = true;
 
   // 当前显示的测试结果
@@ -65,7 +65,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
   // BottomSheet可见性
   bool _isBottomSheetVisible = true; // 默认显示
-  
+
   // 网络状态浮窗可见性
   bool _isNetworkStatusVisible = true; // 默认显示
 
@@ -81,7 +81,6 @@ class _MyHomePageState extends State<MyHomePage> {
     _serviceManager = ServiceManager(
       onLogMessage: _addLogMessage,
       onSnackBarMessage: _showSnackBar,
-      onStateChanged: _updateState,
     );
 
     // 初始化测试模块
@@ -137,7 +136,7 @@ class _MyHomePageState extends State<MyHomePage> {
   /// 添加日志消息
   void _addLogMessage(String message) {
     setState(() {
-      _logMessages = 
+      _logMessages =
           '${DateTime.now().toString().substring(11, 19)} $message\n$_logMessages';
     });
     // 滚动到最新日志
@@ -155,7 +154,7 @@ class _MyHomePageState extends State<MyHomePage> {
   /// 添加日志分割线
   void _addLogDivider() {
     setState(() {
-      _logMessages = 
+      _logMessages =
           '${DateTime.now().toString().substring(11, 19)} ========================================\n$_logMessages';
     });
     // 滚动到最新日志
@@ -173,12 +172,23 @@ class _MyHomePageState extends State<MyHomePage> {
   /// 显示SnackBar消息
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 5),
+        action: SnackBarAction(
+          label: '确认',
+          onPressed: () {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          },
+        ),
+      ),
     );
   }
 
   /// 更新状态
   void _updateState() {
+    // 从ServiceManager获取最新状态
+    _serviceManager.syncStatus();
     setState(() {});
     _updateTestModules();
   }
@@ -189,22 +199,26 @@ class _MyHomePageState extends State<MyHomePage> {
       enableCache: _enableCache,
       enableSpeedTest: _enableSpeedTest,
     );
+    _updateState();
   }
 
   /// 启动代理
   Future<void> _startProxy() async {
     await _serviceManager.startProxy();
+    _updateState();
   }
 
   /// 停止代理
   Future<void> _stopProxy() async {
     await _serviceManager.stopProxy();
+    _updateState();
   }
 
   /// 清除所有缓存
   Future<void> _clearAllCache() async {
     _hostInputController.clear();
     await _serviceManager.clearCache();
+    _updateState();
   }
 
   /// 清除指定域名缓存
@@ -219,6 +233,7 @@ class _MyHomePageState extends State<MyHomePage> {
       return;
     }
     await _serviceManager.clearCache(hosts);
+    _updateState();
   }
 
   /// 切换系统DNS回退
@@ -234,6 +249,7 @@ class _MyHomePageState extends State<MyHomePage> {
       _enableCache = value;
     });
     _serviceManager.setEnableCache(value);
+    _updateState();
   }
 
   /// 切换测速启用
@@ -251,7 +267,8 @@ class _MyHomePageState extends State<MyHomePage> {
       _currentTestType = 'Domain';
     });
     _addLogDivider();
-    await _basicTests.testDomainResolution(enableSystemDnsFallback: _enableSystemDnsFallback);
+    await _basicTests.testDomainResolution(
+        enableSystemDnsFallback: _enableSystemDnsFallback);
     setState(() {
       _currentTestResult = _resolutionResult;
     });
@@ -302,8 +319,9 @@ class _MyHomePageState extends State<MyHomePage> {
     });
 
     _addLogDivider();
-    await SystemDnsFallbackTest.runTest(enableSystemDnsFallback: _enableSystemDnsFallback);
-    
+    await SystemDnsFallbackTest.runTest(
+        enableSystemDnsFallback: _enableSystemDnsFallback);
+
     setState(() {
       _currentTestResult = '系统DNS回退测试完成，请查看控制台输出';
     });
@@ -319,7 +337,7 @@ class _MyHomePageState extends State<MyHomePage> {
 
     _addLogDivider();
     await CacheFunctionalityTest.runTest();
-    
+
     setState(() {
       _currentTestResult = '缓存功能测试完成，请查看控制台输出';
     });
@@ -423,68 +441,71 @@ class _MyHomePageState extends State<MyHomePage> {
       body: Stack(
         children: [
           SingleChildScrollView(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            // 状态信息
-            UIComponents.buildStatusCard(
-              context: context,
-              isInitialized: _serviceManager.isInitialized,
-              isProxyRunning: _serviceManager.isProxyRunning,
-              proxyAddress: _serviceManager.proxyAddress,
-              initializationStatus: _serviceManager.initializationStatus,
-              lastError: _serviceManager.lastError,
-              lastInitializationTime: _serviceManager.lastInitializationTime,
-            ),
-            const SizedBox(height: 16),
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                // 状态信息
+                UIComponents.buildStatusCard(
+                  context: context,
+                  isInitialized: _serviceManager.isInitialized,
+                  isProxyRunning: _serviceManager.isProxyRunning,
+                  proxyAddress: _serviceManager.proxyAddress,
+                  initializationStatus: _serviceManager.initializationStatus,
+                  lastError: _serviceManager.lastError,
+                  lastInitializationTime:
+                      _serviceManager.lastInitializationTime,
+                ),
+                const SizedBox(height: 16),
 
-            // 控制面板
-            UIComponents.buildControlPanelCard(
-              context: context,
-              isInitialized: _serviceManager.isInitialized,
-              isProxyRunning: _serviceManager.isProxyRunning,
-              enableSystemDnsFallback: _enableSystemDnsFallback,
-              enableCache: _enableCache,
-              enableSpeedTest: _enableSpeedTest,
-              hostInputController: _hostInputController,
-              onInitializeDns: _initializeDns,
-              onStartProxy: _startProxy,
-              onStopProxy: _stopProxy,
-              onClearAllCache: _clearAllCache,
-              onClearHostsCache: _clearHostsCache,
-              onSystemDnsFallbackChanged: _toggleSystemDnsFallback,
-              onCacheChanged: _toggleCache,
-              onSpeedTestChanged: _toggleSpeedTest,
-            ),
-            const SizedBox(height: 16),
+                // 控制面板
+                UIComponents.buildControlPanelCard(
+                  context: context,
+                  isInitialized: _serviceManager.isInitialized,
+                  isProxyRunning: _serviceManager.isProxyRunning,
+                  enableSystemDnsFallback: _enableSystemDnsFallback,
+                  enableCache: _enableCache,
+                  enableSpeedTest: _enableSpeedTest,
+                  hostInputController: _hostInputController,
+                  onInitializeDns: _initializeDns,
+                  onStartProxy: _startProxy,
+                  onStopProxy: _stopProxy,
+                  onClearAllCache: _clearAllCache,
+                  onClearHostsCache: _clearHostsCache,
+                  onSystemDnsFallbackChanged: _toggleSystemDnsFallback,
+                  onCacheChanged: _toggleCache,
+                  onSpeedTestChanged: _toggleSpeedTest,
+                ),
+                const SizedBox(height: 16),
 
-            // 功能测试
-            UIComponents.buildFunctionTestCard(
-              context: context,
-              onTestDomainResolution: _testDomainResolution,
-              onTestHttpClient: _testHttpClient,
-              onTestDio: _testDio,
-              onTestSystemDnsFallback: _testSystemDnsFallback,
-              onTestCacheFunctionality: _testCacheFunctionality,
-            ),
-            const SizedBox(height: 16),
+                // 功能测试
+                UIComponents.buildFunctionTestCard(
+                  context: context,
+                  isInitialized: _serviceManager.isInitialized,
+                  isProxyRunning: _serviceManager.isProxyRunning,
+                  onTestDomainResolution: _testDomainResolution,
+                  onTestHttpClient: _testHttpClient,
+                  onTestDio: _testDio,
+                  onTestSystemDnsFallback: _testSystemDnsFallback,
+                  onTestCacheFunctionality: _testCacheFunctionality,
+                ),
+                const SizedBox(height: 16),
 
-            // 高级功能测试
-            UIComponents.buildAdvancedTestCard(
-              context: context,
-              isInitialized: _serviceManager.isInitialized,
-              onTestAdvancedFeatures: _testAdvancedFeatures,
-              onTestPerformance: _testPerformance,
-              onTestErrorHandling: _testErrorHandling,
+                // 高级功能测试
+                UIComponents.buildAdvancedTestCard(
+                  context: context,
+                  isInitialized: _serviceManager.isInitialized,
+                  onTestAdvancedFeatures: _testAdvancedFeatures,
+                  onTestPerformance: _testPerformance,
+                  onTestErrorHandling: _testErrorHandling,
+                ),
+                SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.45,
+                )
+              ],
             ),
-            SizedBox(
-              height: MediaQuery.of(context).size.height * 0.45,
-            )
-          ],
-        ),
           ),
-          
+
           // 网络状态浮窗
           NetworkStatusWidget(
             isVisible: _isNetworkStatusVisible,
@@ -663,7 +684,11 @@ class _MyHomePageState extends State<MyHomePage> {
 
   @override
   void dispose() {
-    _serviceManager.dispose();
+    // 异步释放服务资源，但不等待完成（因为dispose不能是async）
+    _serviceManager.dispose().catchError((error) {
+      // 忽略dispose过程中的错误，因为widget正在销毁
+      print('Service dispose error (ignored): $error');
+    });
     _logScrollController.dispose();
     _hostInputController.dispose();
     super.dispose();
