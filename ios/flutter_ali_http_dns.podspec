@@ -5,18 +5,15 @@
 Pod::Spec.new do |s|
   s.name             = 'flutter_ali_http_dns'
   s.version          = '0.0.1'
-  s.summary          = 'A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support.'
+  s.summary          = 'A Flutter plugin for Alibaba Cloud HttpDNS with intelligent domain resolution and proxy services.'
   s.description      = <<-DESC
-A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support.
+Flutter plugin for Alibaba Cloud HttpDNS with intelligent domain resolution and proxy services.
                        DESC
   s.homepage         = 'https://github.com/jixiaoyong/flutter_ali_http_dns'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Company' => 'email@example.com' }
+  s.author           = { 'JI,XIAOYONG' => 'jixiaoyong1995@gmail.com' }
   s.source           = { :path => '.' }
   s.source_files = 'Classes/**/*.{h,m}'
-  s.resource_bundles = {
-    'flutter_ali_http_dns' => ['Info.plist']
-  }
   s.dependency 'Flutter'
   s.platform = :ios, '12.0'
 
