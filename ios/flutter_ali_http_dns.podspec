@@ -39,11 +39,4 @@ Flutter plugin for Alibaba Cloud HttpDNS with intelligent domain resolution and 
   s.user_target_xcconfig = {
     'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'arm64'
   }
-  
-  # 声明插件需要的权限
-  s.info_plist = {
-    'NSAppTransportSecurity' => {
-      'NSAllowsArbitraryLoads' => true
-    }
-  }
 end

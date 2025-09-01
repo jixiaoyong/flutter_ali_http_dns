@@ -25,7 +25,8 @@ class BasicTests {
   }) : _dnsService = dnsService;
 
   /// 测试域名解析
-  Future<void> testDomainResolution({required bool enableSystemDnsFallback}) async {
+  Future<void> testDomainResolution(
+      {required bool enableSystemDnsFallback}) async {
     try {
       onResultUpdate('正在解析...');
 
@@ -37,15 +38,16 @@ class BasicTests {
       for (final domain in domains) {
         try {
           onLogMessage('开始解析域名: $domain');
-          final ip = await _dnsService.resolveDomain(domain, enableSystemDnsFallback: enableSystemDnsFallback);
-          
-          if (ip != domain && ip.isNotEmpty) {
+          final ip = await _dnsService.resolveDomainNullable(domain,
+              enableSystemDnsFallback: enableSystemDnsFallback);
+
+          if (ip != domain && ip != null && ip.isNotEmpty) {
             results.add('✅ $domain -> $ip');
             successCount++;
             onLogMessage('域名解析成功: $domain -> $ip');
           } else {
-            results.add('❌ $domain -> 解析失败 (返回原域名)');
-            onLogMessage('域名解析失败: $domain (返回原域名)');
+            results.add('❌ $domain -> $ip 解析失败/返回原域名');
+            onLogMessage('域名解析失败: $ip');
           }
         } catch (e) {
           results.add('❌ $domain -> 解析错误: $e');
@@ -55,10 +57,10 @@ class BasicTests {
 
       final successRate = (successCount / totalCount * 100).toStringAsFixed(1);
       final summary = '解析统计: $successCount/$totalCount 成功 (${successRate}%)';
-      
+
       onResultUpdate('$summary\n\n${results.join('\n')}');
       onLogMessage('域名解析测试完成: $summary');
-      
+
       // 显示 SnackBar 消息
       if (successCount > 0) {
         final firstSuccess = results.firstWhere(
@@ -83,11 +85,11 @@ class BasicTests {
   /// 测试HttpClient
   Future<void> testHttpClient() async {
     if (!isProxyRunning) {
-      final errorMessage = '❌ HttpClient 测试失败\n'
+      const errorMessage = '❌ HttpClient 测试失败\n'
           '   错误: 代理服务器未启动\n'
           '   解决方案: 请先点击"启动代理"按钮启动代理服务器\n'
           '   状态: 测试已终止';
-      
+
       onLogMessage('HttpClient 测试失败: 代理服务器未启动');
       onHttpResultUpdate(errorMessage);
       onSnackBarMessage('HttpClient 测试失败: 请先启动代理服务器');
@@ -116,20 +118,21 @@ class BasicTests {
       for (final url in testUrls) {
         try {
           onLogMessage('测试 HttpClient 请求: $url');
-          
+
           final stopwatch = Stopwatch()..start();
-          
+
           // 测试普通 HTTP 请求（保持原域名和端口）
           final request = await client.getUrl(Uri.parse(url));
           final response = await request.close();
           final responseBody = await response.transform(utf8.decoder).join();
-          
+
           stopwatch.stop();
           final duration = stopwatch.elapsedMilliseconds;
 
           // 获取响应头信息
           final contentType = response.headers.contentType?.toString() ?? '未知';
-          final contentLength = response.headers.contentLength ?? responseBody.length;
+          final contentLength =
+              response.headers.contentLength ?? responseBody.length;
           final server = response.headers.value('server') ?? '未知';
           final date = response.headers.value('date') ?? '未知';
 
@@ -141,11 +144,11 @@ class BasicTests {
               '   服务器: $server\n'
               '   响应时间: $date\n'
               '   响应预览: ${responseBody.length > 100 ? responseBody.substring(0, 100) + '...' : responseBody}';
-          
+
           results.add(result);
           successCount++;
           onLogMessage('HttpClient 请求成功: $url (${duration}ms)');
-          
+
           // 实时更新结果
           final currentResult = 'HttpClient 测试进行中...\n'
               '已完成: $successCount/$totalCount\n'
@@ -156,7 +159,7 @@ class BasicTests {
               '   错误: $e';
           results.add(result);
           onLogMessage('HttpClient 请求失败: $url -> $e');
-          
+
           // 实时更新结果
           final currentResult = 'HttpClient 测试进行中...\n'
               '已完成: $successCount/$totalCount\n'
@@ -166,10 +169,11 @@ class BasicTests {
       }
 
       final successRate = (successCount / totalCount * 100).toStringAsFixed(1);
-      final summary = 'HttpClient 测试统计: $successCount/$totalCount 成功 (${successRate}%)';
-      
+      final summary =
+          'HttpClient 测试统计: $successCount/$totalCount 成功 (${successRate}%)';
+
       final detailedResult = '$summary\n\n${results.join('\n\n')}';
-      
+
       onHttpResultUpdate(detailedResult);
       onLogMessage('HttpClient 测试完成: $summary');
       onSnackBarMessage('HttpClient 测试完成: $successCount/$totalCount 成功');
@@ -186,11 +190,11 @@ class BasicTests {
   /// 测试Dio
   Future<void> testDio() async {
     if (!isProxyRunning) {
-      final errorMessage = '❌ Dio 测试失败\n'
+      const errorMessage = '❌ Dio 测试失败\n'
           '   错误: 代理服务器未启动\n'
           '   解决方案: 请先点击"启动代理"按钮启动代理服务器\n'
           '   状态: 测试已终止';
-      
+
       onLogMessage('Dio 测试失败: 代理服务器未启动');
       onDioResultUpdate(errorMessage);
       onSnackBarMessage('Dio 测试失败: 请先启动代理服务器');
@@ -212,7 +216,8 @@ class BasicTests {
             return client;
           },
         );
-        onLogMessage('Dio 已配置代理: ${proxyConfig['host']}:${proxyConfig['port']}');
+        onLogMessage(
+            'Dio 已配置代理: ${proxyConfig['host']}:${proxyConfig['port']}');
       } else {
         onLogMessage('无法获取代理配置');
       }
@@ -231,19 +236,20 @@ class BasicTests {
       for (final url in testUrls) {
         try {
           onLogMessage('测试 Dio 请求: $url');
-          
+
           final stopwatch = Stopwatch()..start();
-          
+
           // 测试 Dio 请求（保持原域名和端口）
           final response = await dio.get(url);
-          
+
           stopwatch.stop();
           final duration = stopwatch.elapsedMilliseconds;
 
           // 获取响应头信息
           final headers = response.headers.map;
           final contentType = headers['content-type']?.first ?? '未知';
-          final contentLength = headers['content-length']?.first ?? response.data.toString().length.toString();
+          final contentLength = headers['content-length']?.first ??
+              response.data.toString().length.toString();
           final server = headers['server']?.first ?? '未知';
           final date = headers['date']?.first ?? '未知';
 
@@ -256,11 +262,11 @@ class BasicTests {
               '   响应时间: $date\n'
               '   代理配置: ${proxyConfig != null ? '已启用 (${proxyConfig['host']}:${proxyConfig['port']})' : '未配置'}\n'
               '   响应预览: ${response.data.toString().length > 100 ? response.data.toString().substring(0, 100) + '...' : response.data.toString()}';
-          
+
           results.add(result);
           successCount++;
           onLogMessage('Dio 请求成功: $url (${duration}ms)');
-          
+
           // 实时更新结果
           final currentResult = 'Dio 测试进行中...\n'
               '已完成: $successCount/$totalCount\n'
@@ -272,7 +278,7 @@ class BasicTests {
               '   代理配置: ${proxyConfig != null ? '已启用 (${proxyConfig['host']}:${proxyConfig['port']})' : '未配置'}';
           results.add(result);
           onLogMessage('Dio 请求失败: $url -> $e');
-          
+
           // 实时更新结果
           final currentResult = 'Dio 测试进行中...\n'
               '已完成: $successCount/$totalCount\n'
@@ -282,10 +288,11 @@ class BasicTests {
       }
 
       final successRate = (successCount / totalCount * 100).toStringAsFixed(1);
-      final summary = 'Dio 测试统计: $successCount/$totalCount 成功 (${successRate}%)';
-      
+      final summary =
+          'Dio 测试统计: $successCount/$totalCount 成功 (${successRate}%)';
+
       final detailedResult = '$summary\n\n${results.join('\n\n')}';
-      
+
       onDioResultUpdate(detailedResult);
       onLogMessage('Dio 测试完成: $summary');
       onSnackBarMessage('Dio 测试完成: $successCount/$totalCount 成功');
@@ -325,7 +332,8 @@ class BasicTests {
       dio.httpClientAdapter = IOHttpClientAdapter(
         createHttpClient: () {
           final client = HttpClient();
-          client.findProxy = (uri) => 'PROXY ${proxyConfig['host']}:${proxyConfig['port']}';
+          client.findProxy =
+              (uri) => 'PROXY ${proxyConfig['host']}:${proxyConfig['port']}';
           return client;
         },
       );
@@ -343,9 +351,9 @@ class BasicTests {
       for (final url in testUrls) {
         try {
           onLogMessage('测试请求: $url');
-          
+
           final response = await dio.get(url);
-          
+
           if (response.statusCode == 200) {
             final result = '✅ $url - 成功 (${response.statusCode})';
             onLogMessage(result);
@@ -366,13 +374,10 @@ class BasicTests {
       final totalCount = results.length;
       final successRate = (successCount / totalCount * 100).toStringAsFixed(1);
 
-      onResultUpdate(
-        'Dio 代理测试完成\n'
-        '成功: $successCount/$totalCount (${successRate}%)\n'
-        '代理地址: ${proxyConfig['host']}:${proxyConfig['port']}\n'
-        '详细结果:\n${results.join('\n')}'
-      );
-
+      onResultUpdate('Dio 代理测试完成\n'
+          '成功: $successCount/$totalCount (${successRate}%)\n'
+          '代理地址: ${proxyConfig['host']}:${proxyConfig['port']}\n'
+          '详细结果:\n${results.join('\n')}');
     } catch (e) {
       onLogMessage('Dio代理测试失败: $e');
       onResultUpdate('Dio代理测试失败: $e');

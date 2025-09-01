@@ -199,16 +199,19 @@
         
         DLog(@"Attempting DNS resolution for: %@", domain);
         
-        NSArray *ipArray = [_dnsResolver getIpv4ByCacheWithDomain:domain andExpiredIPEnabled:YES];
-        
-        if (ipArray && ipArray.count > 0) {
-            NSString *ip = ipArray[0];
-            DLog(@"DNS resolution successful: %@ -> %@", domain, ip);
-            result(ip);
-        } else {
-            DLog(@"DNS resolution returned empty array for: %@", domain);
-            result(nil);
-        }
+        // 使用自动感知网络环境的方法获取IP数组
+        [_dnsResolver getIpsDataWithDomain:domain complete:^(NSArray<NSString *> *dataArray) {
+            if (dataArray && dataArray.count > 0) {
+                // 返回第一个IP地址（可以根据需要选择其他策略）
+                NSString *ip = dataArray[0];
+                DLog(@"DNS resolution successful: %@ -> %@ (total IPs: %lu)", domain, ip, (unsigned long)dataArray.count);
+                DLog(@"All available IPs: %@", [dataArray componentsJoinedByString:@", "]);
+                result(ip);
+            } else {
+                DLog(@"DNS resolution returned empty array for: %@", domain);
+                result(nil);
+            }
+        }];
         
     } @catch (NSException *exception) {
         DLog(@"ERROR: DNS resolution failed for domain '%@': %@", arguments, exception.reason);
