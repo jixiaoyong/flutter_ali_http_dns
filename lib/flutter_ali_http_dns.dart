@@ -88,16 +88,17 @@ class FlutterAliHttpDns {
 
       if (result) {
         _isInitialized = true;
-        
+
         // 配置缓存管理器
         CacheManager.instance.configure(
           maxCacheSize: config.maxCacheSize,
           maxCacheTTL: config.maxCacheTTL,
         );
         CacheManager.instance.setEnabled(config.enableCache);
-        
+
         await _dnsResolver.initialize(config);
-        Logger.info('DNS service initialized successfully with cache ${config.enableCache ? 'enabled' : 'disabled'}');
+        Logger.info(
+            'DNS service initialized successfully with cache ${config.enableCache ? 'enabled' : 'disabled'}');
       } else {
         Logger.error('Failed to initialize DNS service');
       }
@@ -141,6 +142,31 @@ class FlutterAliHttpDns {
     final result = await resolveDomainNullable(domain,
         enableSystemDnsFallback: enableSystemDnsFallback);
     return result ?? domain;
+  }
+
+  /// 使用系统DNS解析域名
+  ///
+  /// [onlyPublicIp] 是否只返回公网IP地址，默认为true
+  /// 该方法会默认过滤掉所有特殊用途的IP地址，这些地址通常不能在互联网上进行路由，
+  /// 从而避免因运营商返回内网或无效IP而导致的连接失败。
+  ///
+  /// [domain] 要解析的域名
+  /// 返回解析后的 IP 地址，如果解析失败则返回 null
+  Future<String?> resolveWithSystemDns(String domain,
+      {bool onlyPublicIp = true}) async {
+    if (!_isInitialized) {
+      Logger.error('DNS service not initialized. Call initialize() first.');
+      return null;
+    }
+
+    try {
+      Logger.debug('Resolving domain using system DNS: $domain');
+      return await _dnsResolver.resolveWithSystemDns(domain,
+          onlyPublicIp: onlyPublicIp);
+    } catch (e) {
+      Logger.error('Failed to resolve domain $domain using system DNS', e);
+      return null;
+    }
   }
 
   /// 动态设置是否启用缓存

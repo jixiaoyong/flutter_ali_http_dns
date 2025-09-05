@@ -114,8 +114,97 @@ class DnsResolver {
     return null;
   }
 
-  /// 使用系统DNS作为备选方案
-  Future<String?> resolveWithSystemDns(String domain) async {
+  /// 验证IP地址是否有效，即该IP地址是否可用于公网通信。
+  ///
+  /// 该方法会精确过滤掉所有特殊用途的IP地址，这些地址通常不能在互联网上进行路由，
+  /// 从而避免因运营商返回内网或无效IP而导致的连接失败。
+  ///
+  /// 过滤范围包括：
+  ///
+  /// **IPv4 地址：**
+  /// - **本地回环地址** (127.0.0.0/8)：用于本机内部通信。
+  /// - **私有地址** (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)：仅用于局域网（LAN）内部通信。
+  /// - **链路本地地址** (169.254.0.0/16)：用于无DHCP服务器时的设备间通信。
+  /// - **多播地址** (224.0.0.0/4)：用于一对多通信，非单点地址。
+  /// - **保留地址** (240.0.0.0/4)：被IANA保留，不能在公网使用。
+  ///
+  /// **IPv6 地址：**
+  /// - **本地回环地址** (::1)：等同于 IPv4 的 127.0.0.1。
+  /// - **私有地址** (fc00:/7)：即唯一本地地址，类似于 IPv4 私有地址。
+  /// - **链路本地地址** (fe80:/10)：等同于 IPv4 的链路本地地址。
+  ///
+  ///
+  /// [ip] 要验证的IP地址字符串。
+  /// 返回 true 表示该IP地址可用于公网通信，返回 false 则表示无效。
+  bool _isValidIpAddress(String ip) {
+    try {
+      final address = InternetAddress(ip);
+
+      // 检查是否为回环地址、多播地址
+      if (address.isLoopback) {
+        // 本地回环地址: 127.0.0.0/8 (IPv4) 或 ::1 (IPv6)
+        Logger.warning('Rejected loopback IP: $ip');
+        return false;
+      }
+      if (address.isMulticast) {
+        // 多播地址: 224.0.0.0/4 (IPv4)
+        Logger.warning('Rejected multicast IP: $ip');
+        return false;
+      }
+      // 检查是否为链路本地地址
+      if (address.isLinkLocal) {
+        Logger.warning('Rejected link-local IP: $ip');
+        return false;
+      }
+
+      // 针对IPv4的特殊地址检查（手动实现私有地址）
+      if (address.type == InternetAddressType.IPv4) {
+        final parts = ip.split('.');
+        final firstOctet = int.parse(parts[0]);
+        final secondOctet = int.parse(parts[1]);
+
+        // IPv4 私有地址: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+        if (firstOctet == 10 ||
+            (firstOctet == 172 && secondOctet >= 16 && secondOctet <= 31) ||
+            (firstOctet == 192 && secondOctet == 168)) {
+          Logger.warning('Rejected private IP: $ip');
+          return false;
+        }
+
+        // 保留地址: 240.0.0.0/4
+        if (firstOctet >= 240) {
+          Logger.warning('Rejected reserved IP: $ip');
+          return false;
+        }
+      }
+
+      // 针对IPv6的特殊地址检查（手动实现私有地址）
+      else if (address.type == InternetAddressType.IPv6) {
+        final ipLower = ip.toLowerCase();
+        // IPv6 私有地址: fc00:: 和 fd00:
+        if (ipLower.startsWith('fc00:') || ipLower.startsWith('fd00:')) {
+          Logger.warning('Rejected IPv6 private IP: $ip');
+          return false;
+        }
+      }
+
+      return true;
+    } on ArgumentError {
+      Logger.warning('Invalid IP address format: $ip');
+      return false;
+    } on Exception catch (e) {
+      Logger.warning(
+          'An unexpected error occurred during IP validation: $ip', e);
+      return false;
+    }
+  }
+
+  /// 使用系统DNS作为备选方案，默认只返回公网IP地址
+  ///
+  /// [domain] 要解析的域名
+  /// [onlyPublicIp] 是否只返回公网IP地址，默认为true
+  Future<String?> resolveWithSystemDns(String domain,
+      {bool onlyPublicIp = true}) async {
     try {
       Logger.debug('Resolving domain using system DNS: $domain');
 
@@ -124,11 +213,26 @@ class DnsResolver {
           .timeout(const Duration(seconds: 5));
 
       if (addresses.isNotEmpty) {
-        final ip = addresses.first.address;
-        _cacheManager.cacheIp(domain, ip);
-        Logger.info(
-            'Domain resolved successfully via system DNS: $domain -> $ip');
-        return ip;
+        // 遍历所有返回的地址，寻找第一个有效的公网地址
+        for (final address in addresses) {
+          final ip = address.address;
+
+          // 验证IP地址的有效性
+          if (!onlyPublicIp || _isValidIpAddress(ip)) {
+            _cacheManager.cacheIp(domain, ip);
+            Logger.info(
+                'Domain resolved successfully via system DNS: $domain -> $ip');
+            return ip;
+          } else {
+            Logger.debug(
+                'Skipping invalid IP address: $ip for domain: $domain');
+          }
+        }
+
+        // 如果没有找到有效的公网地址，记录警告
+        Logger.warning(
+            'No valid public IP addresses found for domain: $domain. '
+            'All resolved addresses were local/private/reserved.');
       }
     } catch (e) {
       Logger.error('Failed to resolve domain $domain using system DNS', e);
