@@ -24,15 +24,16 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
     companion object {
         private const val TAG = "[Android]"
         private const val DNS_TIMEOUT_SECONDS = 10L
+        private const val ENABLE_DEBUG_LOG = true
 
         private fun logDebug(message: String) {
-            if (BuildConfig.DEBUG) {
+            if (ENABLE_DEBUG_LOG) {
                 android.util.Log.d(TAG, message)
             }
         }
 
         private fun logError(message: String, throwable: Throwable? = null) {
-            if (BuildConfig.DEBUG) {
+            if (ENABLE_DEBUG_LOG) {
                 if (throwable != null) {
                     android.util.Log.e(TAG, message, throwable)
                 } else {
@@ -65,7 +66,7 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_ali_http_dns")
         channel.setMethodCallHandler(this)
         applicationContext = flutterPluginBinding.applicationContext
-        DNSResolver.setEnableLogger(BuildConfig.DEBUG)
+        DNSResolver.setEnableLogger(ENABLE_DEBUG_LOG)
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
