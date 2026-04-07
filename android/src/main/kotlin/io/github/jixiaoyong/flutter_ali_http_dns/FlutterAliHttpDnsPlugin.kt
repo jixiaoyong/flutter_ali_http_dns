@@ -24,22 +24,26 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
     companion object {
         private const val TAG = "[Android]"
         private const val DNS_TIMEOUT_SECONDS = 10L
-        private const val ENABLE_DEBUG_LOG = true
+        @Volatile
+        private var enableDebugLog = false
 
         private fun logDebug(message: String) {
-            if (ENABLE_DEBUG_LOG) {
+            if (enableDebugLog) {
                 android.util.Log.d(TAG, message)
             }
         }
 
         private fun logError(message: String, throwable: Throwable? = null) {
-            if (ENABLE_DEBUG_LOG) {
-                if (throwable != null) {
-                    android.util.Log.e(TAG, message, throwable)
-                } else {
-                    android.util.Log.e(TAG, message)
-                }
+            if (throwable != null) {
+                android.util.Log.e(TAG, message, throwable)
+            } else {
+                android.util.Log.e(TAG, message)
             }
+        }
+
+        private fun isDebuggable(context: android.content.Context): Boolean {
+            val flags = context.applicationInfo.flags
+            return (flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
         }
 
         private fun isNetworkAvailable(context: android.content.Context): Boolean {
@@ -66,7 +70,10 @@ class FlutterAliHttpDnsPlugin : FlutterPlugin, MethodCallHandler {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_ali_http_dns")
         channel.setMethodCallHandler(this)
         applicationContext = flutterPluginBinding.applicationContext
-        DNSResolver.setEnableLogger(ENABLE_DEBUG_LOG)
+        applicationContext?.let { context ->
+            enableDebugLog = isDebuggable(context)
+        }
+        DNSResolver.setEnableLogger(enableDebugLog)
     }
 
     override fun onMethodCall(@NonNull call: MethodCall, @NonNull result: Result) {
