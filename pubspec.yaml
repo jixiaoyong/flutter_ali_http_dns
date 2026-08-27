@@ -1,6 +1,6 @@
 name: flutter_ali_http_dns
 description: "A Flutter plugin for Alibaba Cloud HttpDNS integration with proxy server support."
-version: 0.0.1
+version: 0.0.2
 homepage: https://github.com/jixiaoyong/flutter_ali_http_dns
 
 environment:

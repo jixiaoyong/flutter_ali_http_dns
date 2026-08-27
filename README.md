@@ -1,10 +1,27 @@
-# Flutter Ali HTTP DNS 🚧
-
-> ⚠️ 注意：本项目处于积极更新中，各项 API 可能会有变更。
+# Flutter Ali HTTP DNS
 
 一个基于[阿里云 HTTPDNS](https://help.aliyun.com/zh/dns/httpdns-what-is-mobile-resolution-httpdns)的 Flutter 插件，提供智能域名解析和代理功能，支持 HTTP/1.1 和 HTTP/2 协议。
 
-代码参考了[Flutter接入移动解析HTTPDNS Android/iOS SDK实践方案](https://help.aliyun.com/zh/dns/httpdns-practice-solution-of-connecting-flutter-to-alibaba-cloud-public-dns-android-ios-sdk)和已经标记为**discontinued**（截止2025-09-01）的[aliyun_httpdns](https://pub.dev/packages/aliyun_httpdns)。
+代码参考了[Flutter接入移动解析HTTPDNS Android/iOS SDK实践方案](https://help.aliyun.com/zh/dns/httpdns-practice-solution-of-connecting-flutter-to-alibaba-cloud-public-dns-android-ios-sdk)和~~已经标记为**discontinued**（截止2025-09-01）~~的[aliyun_httpdns](https://pub.dev/packages/aliyun_httpdns)。
+
+> 更新： 截止 2026 年 8 月 27 日，官方 `aliyun_httpdns` 已发布 2.0.0（纯 Dart 实现），以下为与本插件（原生 SDK + 本地代理）的对比，供选型参考。
+
+## 与官方 aliyun_httpdns 对比
+
+| 维度         | 官方 aliyun_httpdns 2.0.0（纯 Dart）                          | 本插件 flutter_ali_http_dns（原生 SDK + 代理） |
+| ------------ | ------------------------------------------------------------- | ---------------------------------------------- |
+| **架构**     | 连接工厂直连 IP（SNI 保域名）                                 | 本地 loopback 代理转发                         |
+| **平台**     | iOS / Android / macOS / Windows / Linux                       | 仅 Android / iOS                               |
+| **缓存**     | 内存 + Hive 持久化                                            | 仅内存                                         |
+| **特色能力** | 过期 IP 复用、网络变化批量预解析、region 调度、sessionId 排查 | WebSocket/gRPC 透明转发、Dio/HttpClient 零改造 |
+| **依赖**     | 纯 Dart（connectivity_plus / crypto / hive 等）               | 原生阿里 SDK + 代理进程                        |
+| **凭据位置** | 进 Dart 层（密钥 Dart 可读）                                  | 只在原生侧                                     |
+
+**选型建议**：
+
+- **新项目 / 多平台（桌面端）/ 愿意改适配器** → 官方 `aliyun_httpdns` 2.0.0 更优（纯 Dart、无原生依赖、持久化缓存与 IP 优选齐全）。
+- **已深度使用 Dio/HttpClient 不想改网络层 / 需要 WebSocket、gRPC 透明代理 / 凭据不希望进 Dart** → 保留本插件方案。
+- 注意：官方包没有代理概念，无 WebSocket/gRPC 等价能力；本插件没有桌面端支持。
 
 支持平台： Android、iOS
 
@@ -130,7 +147,6 @@
 - **多客户端支持**: 支持 Dio、HttpClient 等主流 HTTP 客户端，支持 HTTP/1.1 和 HTTP/2 协议
 - **智能缓存**: 独立的缓存管理器，支持动态启用/禁用缓存，提升性能
 
-
 ## 快速开始
 
 ### 1. 添加依赖
@@ -142,22 +158,32 @@ dependencies:
   flutter_ali_http_dns:
     git:
       url: https://github.com/jixiaoyong/flutter_ali_http_dns
-      ref: master # 或指定版本标签，如 v0.0.1
+      ref: master # 或指定版本标签，如 v0.0.2
 ```
 
-#### 方式二：pub.dev 依赖（TODO：待发布到 pub.dev）
+### 2. iOS 网络配置
 
-```yaml
-# TODO: 插件发布到 pub.dev 后使用此方式
-dependencies:
-  flutter_ali_http_dns: ^0.0.1
+#### ATS（App Transport Security）
+
+插件的 HTTPDNS 域名解析走 HTTPS，**默认不需要任何 ATS 例外配置**，也无需在 `ios/Runner/Info.plist` 中做任何修改。
+
+只有宿主 App 因自身业务需要访问明文 HTTP 上游（例如某个 API 或 CDN 只能走 HTTP）时，才需要按 [Apple 指南](https://developer.apple.com/documentation/security/preventing-insecure-network-connections)在**宿主 App 的** `ios/Runner/Info.plist` 中精确配置例外。推荐按域名配置：
+
+```xml
+<key>NSAppTransportSecurity</key>
+<dict>
+    <key>NSExceptionDomains</key>
+    <dict>
+        <key>your-api-domain.com</key>
+        <dict>
+            <key>NSExceptionAllowsInsecureHTTPLoads</key>
+            <true/>
+        </dict>
+    </dict>
+</dict>
 ```
 
-### 2. iOS 网络配置（重要！）
-
-#### iOS 9+ 网络权限配置
-
-如果你的应用需要支持 HTTP 协议（非HTTPS），必须在 `ios/Runner/Info.plist` 文件中添加以下配置：
+**不推荐全局放宽** `NSAllowsArbitraryLoads`（会把宿主 App 的 ATS 保护全部关闭、允许所有明文 HTTP 流量）：
 
 ```xml
 <key>NSAppTransportSecurity</key>
@@ -166,6 +192,9 @@ dependencies:
     <true/>
 </dict>
 ```
+
+- 对插件的 HTTPDNS 功能而言，全局放宽没有必要（解析走 HTTPS）。
+- 全局关掉 ATS 会让宿主 App 的明文 HTTP 请求（含敏感数据）失去传输层保护，安全隐患明显；仅在你清楚其安全影响时才考虑使用。
 
 ### 3. 插件生命周期管理
 
@@ -599,12 +628,14 @@ print('所有IP地址: $allIps');
 ```
 
 **参数说明：**
+
 - `domain`: 要解析的域名
 - `onlyPublicIp`: 是否只返回公网IP地址，默认为 `true`
   - `true`: 过滤私有地址、回环地址、多播地址等，只返回可公网访问的IP
   - `false`: 返回所有解析到的IP地址，包括私有地址（用于调试）
 
 **使用场景：**
+
 - 网络调试和对比测试
 - 当HTTPDNS服务不可用时
 - 需要验证域名解析结果的准确性
@@ -615,23 +646,23 @@ print('所有IP地址: $allIps');
 
 ### DNS 配置 (DnsConfig)
 
-| 参数              | 类型           | 默认值  | 说明             |
-| ----------------- | -------------- | ------- | ---------------- |
-| `accountId`       | `String`       | -       | 阿里云账号 ID    |
-| `accessKeyId`     | `String`       | -       | 访问密钥 ID      |
-| `accessKeySecret` | `String`       | -       | 访问密钥 Secret  |
-| `enableCache`     | `bool`         | `true`  | 是否启用缓存     |
-| `maxCacheSize`    | `int`          | `100`   | 最大缓存大小     |
-| `maxNegativeCache`| `int`          | `30`    | 最大否定缓存时间（秒） |
-| `enableSpeedTest` | `bool`         | `true`  | 是否启用速度测试 |
-| `timeout`         | `int`          | `3`     | 超时时间（秒）   |
-| `enableIPv6`      | `bool`         | `false` | 是否启用 IPv6    |
-| `enableShort`     | `bool`         | `false` | 是否启用短连接   |
-| `preloadDomains`  | `List<String>` | `[]`    | 预加载域名列表   |
-| `keepAliveDomains`| `List<String>` | `[]`    | 缓存保持域名列表 |
-| `maxCacheTTL`     | `int`          | `3600`  | 最大缓存 TTL 时间（秒） |
-| `ispEnable`       | `bool`         | `true`  | 是否启用 ISP 网络区分 |
-| `speedPort`       | `int`          | `80`    | 测速端口         |
+| 参数               | 类型           | 默认值  | 说明                    |
+| ------------------ | -------------- | ------- | ----------------------- |
+| `accountId`        | `String`       | -       | 阿里云账号 ID           |
+| `accessKeyId`      | `String`       | -       | 访问密钥 ID             |
+| `accessKeySecret`  | `String`       | -       | 访问密钥 Secret         |
+| `enableCache`      | `bool`         | `true`  | 是否启用缓存            |
+| `maxCacheSize`     | `int`          | `100`   | 最大缓存大小            |
+| `maxNegativeCache` | `int`          | `30`    | 最大否定缓存时间（秒）  |
+| `enableSpeedTest`  | `bool`         | `true`  | 是否启用速度测试        |
+| `timeout`          | `int`          | `3`     | 超时时间（秒）          |
+| `enableIPv6`       | `bool`         | `false` | 是否启用 IPv6           |
+| `enableShort`      | `bool`         | `false` | 是否启用短连接          |
+| `preloadDomains`   | `List<String>` | `[]`    | 预加载域名列表          |
+| `keepAliveDomains` | `List<String>` | `[]`    | 缓存保持域名列表        |
+| `maxCacheTTL`      | `int`          | `3600`  | 最大缓存 TTL 时间（秒） |
+| `ispEnable`        | `bool`         | `true`  | 是否启用 ISP 网络区分   |
+| `speedPort`        | `int`          | `80`    | 测速端口                |
 
 ### 代理配置 (ProxyConfig)
 
@@ -841,7 +872,6 @@ A: 使用`getMainPort()`获取默认代理端口，或使用`getProxyAddress()`�
 
 A: SDK 会自动处理端口冲突，如果指定端口被占用，会自动寻找下一个可用端口。
 
-
 ### Q: 代理服务器会自动清理端口吗？
 
 A: 是的，当调用`stopProxy()`时，所有端口都会被自动清理。
@@ -881,7 +911,6 @@ A: 不需要。域名解析功能不需要代理服务器，只有 HTTP 请求�
 ### Q: 如何使用系统DNS解析？
 
 A: 使用 `resolveWithSystemDns(String domain, {bool onlyPublicIp = true})` 方法可以直接使用系统DNS解析域名，绕过HTTPDNS服务。默认情况下只返回公网IP地址，过滤掉私有地址、回环地址等无效地址。设置 `onlyPublicIp: false` 可以获取所有IP地址用于调试。这个方法适用于网络调试、对比测试或当HTTPDNS服务不可用时的备选方案。解析成功返回IP地址，失败返回null。
-
 
 ## 开发指南
 

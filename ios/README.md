@@ -60,6 +60,8 @@ dnsResolver?.setValue(accessKeySecret, forKey: "accessKeySecret")
 - SDK 支持最低版本为 iOS 12.0
 - 建议在真机上测试 DNS 解析功能
 - 模拟器环境下 DNS 功能会受限，会直接返回原域名
+- **ATS 无需配置**：插件 HTTPDNS 解析走 HTTPS，默认不需要任何 ATS 例外；插件自身 `Info.plist` 不声明 `NSAppTransportSecurity`
+- **ATS 例外写在哪**：如宿主 App 因业务需要访问明文 HTTP 上游，必须在宿主 App（Flutter 工程为 `ios/Runner/Info.plist`）中配置例外；写在插件 framework 的 `Info.plist` 不生效，也不会从 framework 继承到宿主 App
 
 ## 故障排除
 
@@ -68,5 +70,5 @@ dnsResolver?.setValue(accessKeySecret, forKey: "accessKeySecret")
 1. 是否运行了 `pod install`
 2. 是否重新构建了项目
 3. 是否在真机上测试（模拟器可能有限制）
-4. 网络权限是否正确配置
-5. 阿里云 HttpDNS 配置信息是否正确
+4. 阿里云 HttpDNS 配置信息是否正确
+5. 需要明文 HTTP 访问时，是否在宿主 App 的 `ios/Runner/Info.plist` 中精确配置了 ATS 例外（推荐 `NSExceptionDomains` 按域名，避免全局 `NSAllowsArbitraryLoads`）

@@ -5,15 +5,40 @@ import '../models/proxy_config.dart';
 import '../utils/logger.dart';
 import '../utils/port_utils.dart';
 import '../utils/protocol_utils.dart';
+import '../utils/proxy_auth.dart';
 import '../utils/http1_handler.dart';
 import '../utils/http2_handler.dart';
 import '../services/dns_resolver.dart';
 
-// 使用从工具类导入的类型
+/// 代理服务器安全常量。
+abstract final class ProxyLimits {
+  /// 请求头最大字节数（含请求行与各头，64 KiB）。
+  static const int maxHeaderBytes = 64 * 1024;
+
+  /// 请求头读取超时（10 秒）。
+  static const Duration headerReadTimeout = Duration(seconds: 10);
+
+  /// HTTP/HTTPS/WebSocket 上游连接建立超时（10 秒）。
+  static const Duration upstreamConnectTimeout = Duration(seconds: 10);
+
+  /// 上游响应数据缓冲上限（1 MiB）。
+  static const int maxUpstreamBufferBytes = 1024 * 1024;
+}
+
+/// 代理安全相关常量（供外部/测试引用）。
+abstract final class ProxySecurityConstants {
+  static const int maxHeaderBytes = ProxyLimits.maxHeaderBytes;
+  static const Duration headerReadTimeout = ProxyLimits.headerReadTimeout;
+  static const Duration upstreamConnectTimeout =
+      ProxyLimits.upstreamConnectTimeout;
+  static const int maxUpstreamBufferBytes =
+      ProxyLimits.maxUpstreamBufferBytes;
+}
 
 /// 支持 HTTPDNS 的代理服务器
 /// - 兼容 Dio（原域名+原端口）
 /// - 支持HTTP/2协议（使用http2库）
+/// - 仅绑定 loopback，避免成为无认证开放代理
 class ProxyServer {
   ProxyConfig config;
   final List<ServerSocket> _serverSockets = [];
@@ -22,6 +47,19 @@ class ProxyServer {
 
   // DNS解析器
   final DnsResolver _dnsResolver;
+
+  // 当前实例的代理鉴权凭据（每次启动/注册端口时重新生成，不落盘）
+  ProxyCredentials _credentials = ProxyCredentials.generate();
+  ProxyCredentials get credentials => _credentials;
+
+  // 活动客户端连接（用于 stop() 时先清理，防止连接悬挂）
+  final Set<_ClientHandler> _activeClients = {};
+
+  // 全局最大并发客户端数
+  static const int _maxConcurrentClients = 128;
+
+  // 当前进程内全局并发客户端计数
+  static int _activeClientCount = 0;
 
   static ProxyServer? _instance;
   static final Map<int, ProxyServer> _instancesByPort = {};
@@ -69,6 +107,9 @@ class ProxyServer {
       }
       _allocatedPorts = [port];
 
+      // 每次成功启动都重新生成高熵随机鉴权凭据，不落盘。
+      _credentials = ProxyCredentials.generate();
+
       // 创建服务器socket并开始监听
       await _createServerSocket(port);
 
@@ -107,14 +148,33 @@ class ProxyServer {
   }
 
   /// 创建服务器套接字
+  ///
+  /// 只允许绑定 loopback，防止代理被当作无认证开放代理使用。
   Future<ServerSocket> _createServerSocket(int port) async {
-    final serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
+    final serverSocket = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      port,
+    );
 
     _serverSockets.add(serverSocket);
 
     serverSocket.listen(
       (client) {
-        _ClientHandler(client, this, port).handle();
+        if (_activeClientCount >= _maxConcurrentClients) {
+          Logger.warning(
+            'Rejecting client connection: max concurrent clients '
+            '($_maxConcurrentClients) reached',
+          );
+          _rejectClient(client);
+          return;
+        }
+        _activeClientCount++;
+        final handler = _ClientHandler(client, this, port);
+        _activeClients.add(handler);
+        handler.handle().catchError((Object error) {
+          Logger.error('Client handler error on port $port', error);
+          handler.close();
+        });
       },
       onError: (error) {
         Logger.error('Proxy server error on port $port', error);
@@ -125,15 +185,54 @@ class ProxyServer {
     return serverSocket;
   }
 
+  /// 立即拒绝并断开一个连接（用于并发数超限）。
+  void _rejectClient(Socket client) {
+    try {
+      client.add(
+        utf8.encode(
+          'HTTP/1.1 503 Service Unavailable\r\n'
+          'Connection: close\r\n'
+          '\r\n',
+        ),
+      );
+    } catch (_) {
+      // 忽略写入失败，直接关闭
+    }
+    try {
+      client.destroy();
+    } catch (_) {
+      // 忽略关闭失败
+    }
+  }
+
   /// 停止代理服务器
+  ///
+  /// 顺序：先关闭/清理全部活动客户端连接，再释放端口映射，
+  /// 最后清空 instances 与端口记录，避免残留 socket 悬挂。
   Future<void> stop() async {
+    Logger.info('Stopping proxy server (${_activeClients.length} active '
+        'client connections)');
+
+    // 1. 先清理全部活动连接
+    final clients = List<_ClientHandler>.from(_activeClients);
+    for (final handler in clients) {
+      handler.close();
+    }
+    _activeClients.clear();
+    _activeClientCount = 0;
+
+    // 2. 再关闭监听 socket，释放端口
     await _closeAllServerSockets();
+
+    // 3. 最后清空端口与实例记录
+    final ports = List<int>.from(_allocatedPorts);
     _allocatedPorts.clear();
     _isRunning = false;
-
-    // 从实例映射中移除所有端口
-    for (final port in _allocatedPorts) {
+    for (final port in ports) {
       _instancesByPort.remove(port);
+    }
+    if (identical(_instance, this)) {
+      _instance = null;
     }
 
     Logger.info('Proxy server stopped');
@@ -234,6 +333,9 @@ class ProxyServer {
         Logger.error('Port $port is not available');
         return false;
       }
+
+      // 每次新增监听端口时重新生成鉴权凭据，保证首次注册即启用鉴权。
+      _credentials = ProxyCredentials.generate();
 
       // 创建服务器socket并开始监听
       await _createServerSocket(port);
@@ -336,49 +438,93 @@ class _ClientHandler {
   bool _isHttps = false; // 标记是否为HTTPS连接
   bool _isHttp2 = false; // 标记是否为HTTP/2连接
   bool _isWebSocket = false; // 标记是否为WebSocket连接
+  bool _isAuthenticated = false; // 标记是否已通过代理鉴权
+  bool _isClosed = false; // 标记连接是否已关闭
   StreamSubscription? clientSubscription;
   StreamSubscription? serverSubscription;
+  Timer? _headerTimeout;
+  int _clientSentBytes = 0;
 
   _ClientHandler(this.client, this.proxyServer, this.serverPort);
 
   Future<void> handle() async {
+    // 请求头读取超时（10 秒），超时返回 408 并关闭连接。
+    _startHeaderTimeout();
+
     // 直接使用client.listen，避免asBroadcastStream的问题
     clientSubscription = client.listen(
       (data) async {
-        if (server == null) {
-          buffer.addAll(data);
+        try {
+          if (server == null) {
+            _clientSentBytes += data.length;
 
-          // 尝试解析请求头
-          final requestString = _tryDecodeBuffer();
-          if (requestString != null) {
-            // 智能协议检测 - 按优先级顺序检测
-            final protocolType = ProtocolUtils.detectProtocol(requestString);
+            // 请求头缓冲上限 64 KiB，超限直接 431 并断开，不继续累积。
+            if (_clientSentBytes > ProxyLimits.maxHeaderBytes) {
+              _headerTimeout?.cancel();
+              _headerTimeout = null;
+              _sendAndClose(
+                'HTTP/1.1 431 Request Header Fields Too Large\r\n'
+                'Connection: close\r\n'
+                'Content-Length: 0\r\n'
+                '\r\n',
+              );
+              return;
+            }
 
-            // 记录协议检测结果
-            Logger.info('=== Protocol Detection ===');
-            Logger.info('Request preview: ${requestString.split('\n').first}');
-            Logger.info('Detected protocol: $protocolType');
-            Logger.info(
-              'Client connection: ${client.remoteAddress}:${client.remotePort}',
-            );
-            Logger.info('Server port: $serverPort');
-            Logger.info('=== End Protocol Detection ===');
+            buffer.addAll(data);
 
-            switch (protocolType) {
-              case ProtocolType.http2:
-              case ProtocolType.grpc: // gRPC也使用HTTP/2处理
-                if (!_isHttp2) {
-                  // 避免重复处理
-                  _isHttp2 = true;
-                  await clientSubscription?.cancel();
-                  // 传递client作为数据源
-                  await _handleHttp2InternalForward(requestString, [], client);
-                  return;
-                }
-                break;
+            // 尝试解析请求头
+            final requestString = _tryDecodeBuffer();
+            if (requestString != null) {
+              // 请求头已完整接收，取消读取超时。
+              _headerTimeout?.cancel();
+              _headerTimeout = null;
+
+              // 智能协议检测 - 按优先级顺序检测
+              final protocolType = ProtocolUtils.detectProtocol(requestString);
+
+              // 记录协议检测结果
+              Logger.info('=== Protocol Detection ===');
+              Logger.info(
+                'Request preview: ${requestString.split('\n').first}',
+              );
+              Logger.info('Detected protocol: $protocolType');
+              Logger.info(
+                'Client connection: ${client.remoteAddress}:${client.remotePort}',
+              );
+              Logger.info('Server port: $serverPort');
+              Logger.info('=== End Protocol Detection ===');
+
+              switch (protocolType) {
+                case ProtocolType.http2:
+                case ProtocolType.grpc: // gRPC也使用HTTP/2处理
+                  if (!_isHttp2) {
+                    // HTTP/2 前置数据不包含常规 Proxy-Authorization 头，
+                    // 无法按 HTTP/1 方式校验。为保证「鉴权后转发」，
+                    // 要求客户端先以 HTTP/1 请求通过鉴权（_isAuthenticated）。
+                    if (!_isAuthenticated) {
+                      _rejectUnauthorized();
+                      return;
+                    }
+                    // 避免重复处理
+                    _isHttp2 = true;
+                    await clientSubscription?.cancel();
+                    // 传递client作为数据源
+                    await _handleHttp2InternalForward(
+                      requestString,
+                      [],
+                      client,
+                    );
+                    return;
+                  }
+                  break;
 
               case ProtocolType.websocket:
                 if (!_isWebSocket) {
+                  if (!_authorizeRequest(requestString)) {
+                    _rejectUnauthorized();
+                    return;
+                  }
                   // 避免重复处理
                   _isWebSocket = true;
                   final serverSocket =
@@ -401,6 +547,14 @@ class _ClientHandler {
                     serverSubscription = server!.listen(
                       (data) {
                         try {
+                          if (_checkUpstreamLimit(data.length)) {
+                            Logger.warning(
+                              'Upstream buffer exceeded limit, closing '
+                              'WebSocket connection',
+                            );
+                            close();
+                            return;
+                          }
                           Logger.debug(
                             'Server -> Client (WebSocket): ${data.length} bytes',
                           );
@@ -434,6 +588,10 @@ class _ClientHandler {
 
               case ProtocolType.https:
                 if (!_isHttps) {
+                  if (!_authorizeRequest(requestString)) {
+                    _rejectUnauthorized();
+                    return;
+                  }
                   // 避免重复处理
                   _isHttps = true;
                   final connectMatch = RegExp(
@@ -460,6 +618,14 @@ class _ClientHandler {
                       serverSubscription = server!.listen(
                         (data) {
                           try {
+                            if (_checkUpstreamLimit(data.length)) {
+                              Logger.warning(
+                                'Upstream buffer exceeded limit, closing '
+                                'HTTPS tunnel',
+                              );
+                              close();
+                              return;
+                            }
                             Logger.debug(
                               'Server -> Client (HTTPS): ${data.length} bytes',
                             );
@@ -494,6 +660,10 @@ class _ClientHandler {
 
               case ProtocolType.http:
                 if (!_isHttps && !_isHttp2 && !_isWebSocket) {
+                  if (!_authorizeRequest(requestString)) {
+                    _rejectUnauthorized();
+                    return;
+                  }
                   // 避免重复处理
                   final httpMatch = RegExp(
                     r'^([A-Z]+) ([^ ]+) HTTP/',
@@ -519,6 +689,14 @@ class _ClientHandler {
                       serverSubscription = server!.listen(
                         (data) {
                           try {
+                            if (_checkUpstreamLimit(data.length)) {
+                              Logger.warning(
+                                'Upstream buffer exceeded limit, closing HTTP '\
+                                'connection',
+                              );
+                              close();
+                              return;
+                            }
                             Logger.debug(
                               'Server -> Client (HTTP): ${data.length} bytes',
                             );
@@ -554,6 +732,10 @@ class _ClientHandler {
               case ProtocolType.unknown:
                 // 只有在没有其他协议标记时才报告未知协议
                 if (!_isHttps && !_isHttp2 && !_isWebSocket) {
+                  if (!_isAuthenticated && !_looksLikeAuthRequest(requestString)) {
+                    _rejectUnauthorized();
+                    return;
+                  }
                   Logger.warning(
                     'Unrecognized protocol: ${requestString.split('\n').first}',
                   );
@@ -608,6 +790,91 @@ class _ClientHandler {
       pendingData.length,
       pendingData.length,
     );
+  }
+
+  /// 校验请求头中携带的 Proxy-Authorization 是否为当前凭据的 Basic Auth。
+  ///
+  /// 校验通过后将 _isAuthenticated 置为 true，使同一连接后续请求
+  /// （如 HTTP/2 升级或 CONNECT 隧道）无需重复认证。
+  bool _authorizeRequest(String requestString) {
+    final credentials = proxyServer.credentials;
+    if (credentials == null) {
+      Logger.error('Proxy credentials not available, rejecting request');
+      return false;
+    }
+
+    final authValue = _extractHeaderValue(requestString, 'Proxy-Authorization');
+    if (credentials.validate(authValue)) {
+      _isAuthenticated = true;
+      return true;
+    }
+    return false;
+  }
+
+  /// 从未知协议判断是否为合法的认证请求（普通 HTTP/WebSocket/CONNECT 首行）。
+  bool _looksLikeAuthRequest(String requestString) {
+    final firstLine = requestString.split('\n').first.trim();
+    return RegExp(r'^([A-Z]+) ([^ ]+) HTTP/').hasMatch(firstLine) ||
+        firstLine.startsWith('CONNECT ');
+  }
+
+  /// 未认证请求返回 407，并携带 Proxy-Authenticate 挑战头，随后断开。
+  void _rejectUnauthorized() {
+    _headerTimeout?.cancel();
+    _headerTimeout = null;
+    final realm = proxyServer.credentials?.authenticateHeaderValue() ??
+        'Basic realm="httpdns-proxy"';
+    _sendAndClose(
+      'HTTP/1.1 407 Proxy Authentication Required\r\n'
+      '$realm\r\n'
+      'Connection: close\r\n'
+      'Content-Length: 0\r\n'
+      '\r\n',
+    );
+  }
+
+  /// 写入响应并立即关闭连接。
+  void _sendAndClose(String response) {
+    try {
+      client.add(utf8.encode(response));
+      client.flush();
+    } catch (e) {
+      Logger.error('Failed to send response to client', e);
+    }
+    close();
+  }
+
+  /// 从请求字符串中提取指定头（大小写不敏感）的值。
+  String? _extractHeaderValue(String requestString, String headerName) {
+    final lines = requestString.split('\r\n');
+    for (final line in lines) {
+      final colonIndex = line.indexOf(':');
+      if (colonIndex <= 0) {
+        continue;
+      }
+      final name = line.substring(0, colonIndex).trim().toLowerCase();
+      if (name == headerName.toLowerCase()) {
+        return line.substring(colonIndex + 1).trim();
+      }
+    }
+    return null;
+  }
+
+  /// 启动请求头读取超时定时器，超时返回 408 并关闭连接。
+  void _startHeaderTimeout() {
+    _headerTimeout?.cancel();
+    _headerTimeout = Timer(ProxyLimits.headerReadTimeout, () {
+      if (_isClosed || server != null) {
+        return;
+      }
+      Logger.warning('Header read timeout on client connection');
+      _sendAndClose(
+        'HTTP/1.1 408 Request Timeout\r\n'
+        'Connection: close\r\n'
+        'Content-Length: 0\r\n'
+        '\r\n',
+      );
+    });
   }
 
   /// 尝试安全地解码缓冲区数据
@@ -1069,20 +1336,48 @@ Connection Details:
   }
 
   void close() {
+    if (_isClosed) {
+      return;
+    }
+    _isClosed = true;
     try {
       Logger.debug('Closing connection');
 
-      // 取消订阅
+      // 取消订阅与超时定时器，防止悬空回调
+      _headerTimeout?.cancel();
+      _headerTimeout = null;
       clientSubscription?.cancel();
       serverSubscription?.cancel();
 
       // 关闭连接
       client.destroy();
       server?.destroy();
+      server = null;
+      buffer.clear();
+
+      if (proxyServer._activeClients.remove(this)) {
+        ProxyServer._activeClientCount--;
+      }
       Logger.debug('Connection closed successfully');
     } catch (e) {
       Logger.error('Error closing connection', e);
     }
+  }
+
+  // 上游响应累计缓冲上限 1 MiB，超限立即断开。
+  int _upstreamBytes = 0;
+
+  bool _checkUpstreamLimit(int dataLength) {
+    _upstreamBytes += dataLength;
+    if (_upstreamBytes > ProxyLimits.maxUpstreamBufferBytes) {
+      Logger.warning(
+        'Upstream response buffer exceeded limit '
+        '(${_upstreamBytes} > ${ProxyLimits.maxUpstreamBufferBytes}), '
+        'closing connection',
+      );
+      return true;
+    }
+    return false;
   }
 
   /// 添加数据转发监控日志

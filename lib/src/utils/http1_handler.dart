@@ -58,14 +58,16 @@ class Http1Handler {
         throw Exception('Invalid target IP: $targetIp');
       }
 
-      // 建立到真实服务器的连接
+      // 建立到真实服务器的连接（10 秒超时，与 CONNECT/WebSocket 一致）
       Logger.info('Establishing connection:');
       Logger.info('  - Target: $targetIp:$mappedPort');
       Logger.info('  - Method: $method');
 
-      final serverSocket = await Socket.connect(targetIp, mappedPort);
+      final serverSocket = await Socket.connect(targetIp, mappedPort,
+          timeout: const Duration(seconds: 10));
 
-      // 修改请求中的 Host 头
+      // 修改请求中的 Host 头，并移除代理专用头（Proxy-Authorization /
+      // Proxy-Connection），确保鉴权信息绝不泄漏到真实服务器。
       final modifiedRequest = _modifyHttpRequest(
           request, mappedHost, mappedPort,
           includeDomainInAuthority: includeDomainInAuthority);
@@ -217,8 +219,9 @@ class Http1Handler {
       final serverSocket = await Socket.connect(targetIp, mappedPort,
           timeout: const Duration(seconds: 10));
 
-      // 转发WebSocket握手请求到服务器
-      serverSocket.add(utf8.encode(requestString));
+      // 转发WebSocket握手请求到服务器，移除代理专用头防止泄漏。
+      serverSocket.add(
+          utf8.encode(_stripProxyHeaders(requestString)));
 
       Logger.debug('WebSocket connection established to $targetIp:$mappedPort');
 
@@ -232,11 +235,30 @@ class Http1Handler {
     }
   }
 
+  /// 移除请求中的代理专用头（Proxy-Authorization / Proxy-Connection），
+  /// 防止鉴权信息泄漏到真实服务器。
+  static String _stripProxyHeaders(String request) {
+    final lines = request.split('\r\n');
+    final keptLines = <String>[];
+    for (final line in lines) {
+      final lowerLine = line.toLowerCase();
+      if (lowerLine.startsWith('proxy-authorization:') ||
+          lowerLine.startsWith('proxy-connection:')) {
+        Logger.debug('Stripping proxy header: ${line.split(':').first}');
+        continue;
+      }
+      keptLines.add(line);
+    }
+    return keptLines.join('\r\n');
+  }
+
   /// 修改HTTP请求中的Host头
   static String _modifyHttpRequest(String request, String host, int port,
       {bool includeDomainInAuthority = true}) {
-    // 修改请求中的 Host 头
-    final lines = request.split('\r\n');
+    // 修改请求中的 Host 头，同时移除代理专用头（Proxy-Authorization /
+    // Proxy-Connection），防止鉴权信息泄漏到真实服务器。
+    final strippedRequest = _stripProxyHeaders(request);
+    final lines = strippedRequest.split('\r\n');
     final modifiedLines = <String>[];
 
     for (final line in lines) {

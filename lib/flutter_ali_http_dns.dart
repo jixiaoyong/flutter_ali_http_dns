@@ -9,11 +9,13 @@ import 'src/services/proxy_server.dart';
 import 'src/services/cache_manager.dart';
 import 'src/utils/logger.dart';
 import 'src/utils/port_utils.dart';
+import 'src/utils/proxy_auth.dart';
 
 export 'src/models/dns_config.dart';
 export 'src/models/proxy_config.dart';
 export 'src/utils/logger.dart';
 export 'src/utils/port_utils.dart';
+export 'src/utils/proxy_auth.dart';
 
 /// Flutter 阿里云 HttpDNS 插件主类
 class FlutterAliHttpDns {
@@ -385,13 +387,24 @@ class FlutterAliHttpDns {
   /// 返回当前运行的代理服务器实例，如果没有则返回 null
   ProxyServer? get currentProxyServer => _proxyServer;
 
+  /// 获取当前代理的鉴权凭据。
+  ///
+  /// 返回为 null 表示代理未运行。凭据仅用于宿主 App 与本地代理之间的
+  /// Basic Auth，绝不可当作业务请求头发送。
+  Future<ProxyCredentials?> getProxyCredentials() async {
+    if (!_isProxyRunning || _proxyServer == null) {
+      return null;
+    }
+    return _proxyServer!.credentials;
+  }
+
   /// 为 HttpClient 配置代理
   ///
   /// [client] HttpClient 实例
   /// 配置 HttpClient 使用插件提供的代理
   /// 返回配置是否成功
   Future<bool> configureHttpClient(HttpClient client) async {
-    if (!_isProxyRunning) {
+    if (!_isProxyRunning || _proxyServer == null) {
       Logger.error('Proxy server not running. Call startProxy() first.');
       return false;
     }
@@ -400,6 +413,23 @@ class FlutterAliHttpDns {
       final proxyConfig = await getProxyConfigString();
       if (proxyConfig != null) {
         client.findProxy = (uri) => proxyConfig;
+
+        // 为 dart:io HttpClient 配置代理 Basic Auth：
+        // addProxyCredentials 预置凭据，authenticateProxy 返回 true
+        // 使 dart:io 在代理返回 407 + Proxy-Authenticate 挑战时自动
+        // 附上对应凭据，避免由调用方手工拼 Proxy-Authorization 头。
+        final credentials = _proxyServer!.credentials;
+        final proxyUri = Uri.parse(address.startsWith('http')
+            ? address
+            : 'http://$address');
+        client.addProxyCredentials(
+          ProxyCredentials.realm,
+          proxyUri,
+          credentials.username,
+          credentials.token,
+        );
+        client.authenticateProxy = (uri, scheme, realm) => true;
+
         Logger.info('HttpClient configured with proxy: $proxyConfig');
         return true;
       } else {
@@ -414,9 +444,11 @@ class FlutterAliHttpDns {
 
   /// 获取 Dio 代理配置
   ///
-  /// 返回用于 Dio 配置的代理设置
+  /// 返回用于 Dio 配置的代理设置，包含 host/port 与
+  /// username/password（Base64 编码的 Basic Auth 值）。
+  /// Dio / IOHttpClientAdapter 可基于这些字段对代理自动做 Basic Auth。
   Future<Map<String, dynamic>?> getDioProxyConfig() async {
-    if (!_isProxyRunning) {
+    if (!_isProxyRunning || _proxyServer == null) {
       return null;
     }
 
@@ -424,9 +456,13 @@ class FlutterAliHttpDns {
     if (address != null) {
       final parts = address.split(':');
       if (parts.length == 2) {
+        final credentials = _proxyServer!.credentials;
         return {
           'host': parts[0],
           'port': int.tryParse(parts[1]) ?? 4041,
+          'username': credentials.username,
+          'token': credentials.token,
+          'auth': credentials.basicAuthValue(),
         };
       }
     }

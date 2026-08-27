@@ -4,7 +4,7 @@
 #
 Pod::Spec.new do |s|
   s.name             = 'flutter_ali_http_dns'
-  s.version          = '0.0.1'
+  s.version          = '0.0.2'
   s.summary          = 'A Flutter plugin for Alibaba Cloud HttpDNS with intelligent domain resolution and proxy services.'
   s.description      = <<-DESC
 Flutter plugin for Alibaba Cloud HttpDNS with intelligent domain resolution and proxy services.
