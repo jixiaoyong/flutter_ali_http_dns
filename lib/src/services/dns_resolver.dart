@@ -19,7 +19,8 @@ class DnsResolver {
     _preloadDomains = List.from(config.preloadDomains);
 
     Logger.info(
-        'DnsResolver initialized with cache size: ${config.maxCacheSize}');
+      'DnsResolver initialized with cache size: ${config.maxCacheSize}',
+    );
 
     // 预加载域名
     if (_preloadDomains.isNotEmpty) {
@@ -40,8 +41,15 @@ class DnsResolver {
   /// [domain] 要解析的域名
   /// [enableSystemDnsFallback] 是否启用系统DNS回退，默认为true
   /// 返回解析后的 IP 地址，如果解析失败则返回 null
-  Future<String?> resolve(String domain,
-      {bool enableSystemDnsFallback = true}) async {
+  Future<String?> resolve(
+    String domain, {
+    bool enableSystemDnsFallback = true,
+  }) async {
+    // IP 字面量无需 DNS 解析，代理应直接连接目标地址。
+    final literalAddress = InternetAddress.tryParse(domain);
+    if (literalAddress != null) {
+      return literalAddress.address;
+    }
     if (!_isInitialized) {
       Logger.error('DnsResolver not initialized');
       return null;
@@ -66,11 +74,13 @@ class DnsResolver {
     // 根据配置决定是否回退到系统DNS
     if (enableSystemDnsFallback) {
       Logger.warning(
-          'HTTPDNS resolution failed for $domain. Falling back to system DNS.');
+        'HTTPDNS resolution failed for $domain. Falling back to system DNS.',
+      );
       return await resolveWithSystemDns(domain);
     } else {
       Logger.warning(
-          'HTTPDNS resolution failed for $domain. System fallback disabled.');
+        'HTTPDNS resolution failed for $domain. System fallback disabled.',
+      );
       return null;
     }
   }
@@ -82,11 +92,12 @@ class DnsResolver {
     for (int attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
         Logger.debug(
-            'HTTPDNS resolution attempt ${attempt + 1} for domain: $domain');
+          'HTTPDNS resolution attempt ${attempt + 1} for domain: $domain',
+        );
 
         // 直接调用平台方法，避免循环调用
-        final String? ip =
-            await FlutterAliHttpDnsPlatform.instance.resolveDomain(domain);
+        final String? ip = await FlutterAliHttpDnsPlatform.instance
+            .resolveDomain(domain);
 
         if (ip != null && ip.isNotEmpty) {
           // 成功解析，重置重试计数
@@ -94,11 +105,13 @@ class DnsResolver {
           return ip;
         } else {
           Logger.debug(
-              'HTTPDNS returned null or empty for $domain (attempt ${attempt + 1})');
+            'HTTPDNS returned null or empty for $domain (attempt ${attempt + 1})',
+          );
         }
       } catch (e) {
         Logger.error(
-            'HTTPDNS resolution error for $domain (attempt ${attempt + 1}): $e');
+          'HTTPDNS resolution error for $domain (attempt ${attempt + 1}): $e',
+        );
       }
 
       // 如果不是最后一次尝试，等待后重试
@@ -110,7 +123,8 @@ class DnsResolver {
     // 所有重试都失败了
     _cacheManager.setRetryCount(domain, retryCount + 1);
     Logger.warning(
-        'All HTTPDNS resolution attempts failed for domain: $domain');
+      'All HTTPDNS resolution attempts failed for domain: $domain',
+    );
     return null;
   }
 
@@ -177,7 +191,6 @@ class DnsResolver {
           return false;
         }
       }
-
       // 针对IPv6的特殊地址检查（手动实现私有地址）
       else if (address.type == InternetAddressType.IPv6) {
         final ipLower = ip.toLowerCase();
@@ -194,7 +207,9 @@ class DnsResolver {
       return false;
     } on Exception catch (e) {
       Logger.warning(
-          'An unexpected error occurred during IP validation: $ip', e);
+        'An unexpected error occurred during IP validation: $ip',
+        e,
+      );
       return false;
     }
   }
@@ -203,14 +218,17 @@ class DnsResolver {
   ///
   /// [domain] 要解析的域名
   /// [onlyPublicIp] 是否只返回公网IP地址，默认为true
-  Future<String?> resolveWithSystemDns(String domain,
-      {bool onlyPublicIp = true}) async {
+  Future<String?> resolveWithSystemDns(
+    String domain, {
+    bool onlyPublicIp = true,
+  }) async {
     try {
       Logger.debug('Resolving domain using system DNS: $domain');
 
       // 使用超时机制
-      final addresses = await InternetAddress.lookup(domain)
-          .timeout(const Duration(seconds: 5));
+      final addresses = await InternetAddress.lookup(
+        domain,
+      ).timeout(const Duration(seconds: 5));
 
       if (addresses.isNotEmpty) {
         // 遍历所有返回的地址，寻找第一个有效的公网地址
@@ -221,18 +239,21 @@ class DnsResolver {
           if (!onlyPublicIp || _isValidIpAddress(ip)) {
             _cacheManager.cacheIp(domain, ip);
             Logger.info(
-                'Domain resolved successfully via system DNS: $domain -> $ip');
+              'Domain resolved successfully via system DNS: $domain -> $ip',
+            );
             return ip;
           } else {
             Logger.debug(
-                'Skipping invalid IP address: $ip for domain: $domain');
+              'Skipping invalid IP address: $ip for domain: $domain',
+            );
           }
         }
 
         // 如果没有找到有效的公网地址，记录警告
         Logger.warning(
-            'No valid public IP addresses found for domain: $domain. '
-            'All resolved addresses were local/private/reserved.');
+          'No valid public IP addresses found for domain: $domain. '
+          'All resolved addresses were local/private/reserved.',
+        );
       }
     } catch (e) {
       Logger.error('Failed to resolve domain $domain using system DNS', e);

@@ -27,7 +27,7 @@ class ProxyServer {
   static final Map<int, ProxyServer> _instancesByPort = {};
 
   ProxyServer({required this.config, required DnsResolver dnsResolver})
-      : _dnsResolver = dnsResolver;
+    : _dnsResolver = dnsResolver;
 
   /// 启动默认代理服务器（监听单个端口）
   ///
@@ -35,7 +35,9 @@ class ProxyServer {
   /// [dnsResolver] DNS解析器实例
   /// 返回启动的代理服务器实例
   static Future<ProxyServer?> start(
-      ProxyConfig config, DnsResolver dnsResolver) async {
+    ProxyConfig config,
+    DnsResolver dnsResolver,
+  ) async {
     Logger.info('Starting default proxy server on single port');
 
     // 创建代理服务器实例
@@ -72,7 +74,8 @@ class ProxyServer {
 
       _isRunning = true;
       Logger.info(
-          'Default proxy server started on port $port (with HTTP/2 support)');
+        'Default proxy server started on port $port (with HTTP/2 support)',
+      );
       return true;
     } catch (e) {
       Logger.error('Failed to start default proxy server', e);
@@ -105,10 +108,7 @@ class ProxyServer {
 
   /// 创建服务器套接字
   Future<ServerSocket> _createServerSocket(int port) async {
-    final serverSocket = await ServerSocket.bind(
-      InternetAddress.anyIPv4,
-      port,
-    );
+    final serverSocket = await ServerSocket.bind(InternetAddress.anyIPv4, port);
 
     _serverSockets.add(serverSocket);
 
@@ -359,7 +359,8 @@ class _ClientHandler {
             Logger.info('Request preview: ${requestString.split('\n').first}');
             Logger.info('Detected protocol: $protocolType');
             Logger.info(
-                'Client connection: ${client.remoteAddress}:${client.remotePort}');
+              'Client connection: ${client.remoteAddress}:${client.remotePort}',
+            );
             Logger.info('Server port: $serverPort');
             Logger.info('=== End Protocol Detection ===');
 
@@ -381,14 +382,19 @@ class _ClientHandler {
                   // 避免重复处理
                   _isWebSocket = true;
                   final serverSocket =
-                      await Http1Handler.handleWebSocketRequest(client,
-                          requestString, proxyServer._dnsResolver, proxyServer);
+                      await Http1Handler.handleWebSocketRequest(
+                        client,
+                        requestString,
+                        proxyServer._dnsResolver,
+                        proxyServer,
+                      );
                   if (serverSocket == null) {
                     throw Exception('Failed to handle WebSocket request');
                   }
 
-                  // 设置服务器连接
+                  // 设置服务器连接，并转发解析请求头期间缓存的剩余数据。
                   server = serverSocket;
+                  _flushPendingClientData();
 
                   // 设置服务器端数据监听（用于WebSocket双向转发）
                   if (server != null) {
@@ -396,14 +402,19 @@ class _ClientHandler {
                       (data) {
                         try {
                           Logger.debug(
-                              'Server -> Client (WebSocket): ${data.length} bytes');
+                            'Server -> Client (WebSocket): ${data.length} bytes',
+                          );
                           client.add(data);
                           _logDataForwarding(
-                              'Server -> Client', data.length, data.length);
+                            'Server -> Client',
+                            data.length,
+                            data.length,
+                          );
                         } catch (e) {
                           Logger.error(
-                              'Client socket error during server->client forwarding',
-                              e);
+                            'Client socket error during server->client forwarding',
+                            e,
+                          );
                           close();
                         }
                       },
@@ -425,21 +436,24 @@ class _ClientHandler {
                 if (!_isHttps) {
                   // 避免重复处理
                   _isHttps = true;
-                  final connectMatch = RegExp(r'CONNECT ([^ :]+):(\d+)')
-                      .firstMatch(requestString);
+                  final connectMatch = RegExp(
+                    r'CONNECT ([^ :]+):(\d+)',
+                  ).firstMatch(requestString);
                   if (connectMatch != null) {
                     final serverSocket =
                         await Http1Handler.handleConnectRequest(
-                            client,
-                            connectMatch,
-                            proxyServer._dnsResolver,
-                            proxyServer);
+                          client,
+                          connectMatch,
+                          proxyServer._dnsResolver,
+                          proxyServer,
+                        );
                     if (serverSocket == null) {
                       throw Exception('Failed to handle HTTPS CONNECT request');
                     }
 
-                    // 设置服务器连接
+                    // 设置服务器连接，并转发 CONNECT 建连期间缓存的数据。
                     server = serverSocket;
+                    _flushPendingClientData();
 
                     // 设置服务器端数据监听（用于HTTPS双向转发）
                     if (server != null) {
@@ -447,14 +461,19 @@ class _ClientHandler {
                         (data) {
                           try {
                             Logger.debug(
-                                'Server -> Client (HTTPS): ${data.length} bytes');
+                              'Server -> Client (HTTPS): ${data.length} bytes',
+                            );
                             client.add(data);
                             _logDataForwarding(
-                                'Server -> Client', data.length, data.length);
+                              'Server -> Client',
+                              data.length,
+                              data.length,
+                            );
                           } catch (e) {
                             Logger.error(
-                                'Client socket error during server->client forwarding',
-                                e);
+                              'Client socket error during server->client forwarding',
+                              e,
+                            );
                             close();
                           }
                         },
@@ -476,21 +495,24 @@ class _ClientHandler {
               case ProtocolType.http:
                 if (!_isHttps && !_isHttp2 && !_isWebSocket) {
                   // 避免重复处理
-                  final httpMatch = RegExp(r'^([A-Z]+) ([^ ]+) HTTP/')
-                      .firstMatch(requestString);
+                  final httpMatch = RegExp(
+                    r'^([A-Z]+) ([^ ]+) HTTP/',
+                  ).firstMatch(requestString);
                   if (httpMatch != null) {
                     final serverSocket = await Http1Handler.handleHttpRequest(
-                        client,
-                        httpMatch,
-                        requestString,
-                        proxyServer._dnsResolver,
-                        proxyServer);
+                      client,
+                      httpMatch,
+                      requestString,
+                      proxyServer._dnsResolver,
+                      proxyServer,
+                    );
                     if (serverSocket == null) {
                       throw Exception('Failed to handle HTTP request');
                     }
 
-                    // 设置服务器连接
+                    // 设置服务器连接，并转发请求头后同包到达或建连期间缓存的 body。
                     server = serverSocket;
+                    _flushPendingClientData();
 
                     // 设置服务器端数据监听（用于HTTP双向转发）
                     if (server != null) {
@@ -498,14 +520,19 @@ class _ClientHandler {
                         (data) {
                           try {
                             Logger.debug(
-                                'Server -> Client (HTTP): ${data.length} bytes');
+                              'Server -> Client (HTTP): ${data.length} bytes',
+                            );
                             client.add(data);
                             _logDataForwarding(
-                                'Server -> Client', data.length, data.length);
+                              'Server -> Client',
+                              data.length,
+                              data.length,
+                            );
                           } catch (e) {
                             Logger.error(
-                                'Client socket error during server->client forwarding',
-                                e);
+                              'Client socket error during server->client forwarding',
+                              e,
+                            );
                             close();
                           }
                         },
@@ -528,7 +555,8 @@ class _ClientHandler {
                 // 只有在没有其他协议标记时才报告未知协议
                 if (!_isHttps && !_isHttp2 && !_isWebSocket) {
                   Logger.warning(
-                      'Unrecognized protocol: ${requestString.split('\n').first}');
+                    'Unrecognized protocol: ${requestString.split('\n').first}',
+                  );
                   close();
                   return;
                 }
@@ -564,6 +592,21 @@ class _ClientHandler {
         close();
       },
       onDone: close,
+    );
+  }
+
+  /// 将目标连接建立前累计的数据按原顺序转发，避免遗漏与请求头同包到达的 body。
+  void _flushPendingClientData() {
+    if (server == null || buffer.isEmpty) {
+      return;
+    }
+    final pendingData = List<int>.from(buffer);
+    buffer.clear();
+    server!.add(pendingData);
+    _logDataForwarding(
+      'Client -> Server (pending)',
+      pendingData.length,
+      pendingData.length,
     );
   }
 
@@ -605,7 +648,10 @@ class _ClientHandler {
 
   /// 处理HTTP/2请求 - 使用Http2Handler工具类
   Future<void> _handleHttp2InternalForward(
-      String requestString, List<int> initialData, Socket clientSocket) async {
+    String requestString,
+    List<int> initialData,
+    Socket clientSocket,
+  ) async {
     Logger.debug('HTTP/2 internal forward: ${requestString.split('\n').first}');
 
     // 记录HTTP/2请求开始时的详细信息
@@ -617,16 +663,20 @@ class _ClientHandler {
     while (retryCount <= maxRetries) {
       try {
         // 使用Http2Handler处理HTTP/2连接，添加超时
-        final success = await Http2Handler.handleHttp2Connection(
-                clientSocket, serverPort, proxyServer._dnsResolver,
-                initialData: initialData)
-            .timeout(
-          const Duration(seconds: 30),
-          onTimeout: () {
-            throw TimeoutException(
-                'HTTP/2 connection timeout after 30 seconds');
-          },
-        );
+        final success =
+            await Http2Handler.handleHttp2Connection(
+              clientSocket,
+              serverPort,
+              proxyServer._dnsResolver,
+              initialData: initialData,
+            ).timeout(
+              const Duration(seconds: 30),
+              onTimeout: () {
+                throw TimeoutException(
+                  'HTTP/2 connection timeout after 30 seconds',
+                );
+              },
+            );
 
         if (!success) {
           throw Exception('Failed to handle HTTP/2 connection');
@@ -648,7 +698,8 @@ class _ClientHandler {
         // 检查是否应该重试
         if (retryCount <= maxRetries && _shouldRetryHttp2Error(e)) {
           Logger.info(
-              'Retrying HTTP/2 connection (attempt $retryCount/$maxRetries)');
+            'Retrying HTTP/2 connection (attempt $retryCount/$maxRetries)',
+          );
           await Future.delayed(Duration(seconds: retryCount)); // 递增延迟
           continue;
         }
@@ -665,7 +716,8 @@ class _ClientHandler {
     try {
       Logger.info('=== HTTP/2 Request Start ===');
       Logger.info(
-          'Request string: ${requestString.replaceAll('\n', '\\n').replaceAll('\r', '\\r')}');
+        'Request string: ${requestString.replaceAll('\n', '\\n').replaceAll('\r', '\\r')}',
+      );
 
       // 解析请求头信息
       final lines = requestString.split('\r\n');
@@ -709,7 +761,8 @@ class _ClientHandler {
       // 因为HTTP/2连接是通过Http2Handler处理的，不依赖server变量
       if (_isHttp2) {
         Logger.info(
-            'HTTP/2 connection verification: PASSED - HTTP/2 connection established via Http2Handler');
+          'HTTP/2 connection verification: PASSED - HTTP/2 connection established via Http2Handler',
+        );
         Logger.info('  - HTTP/2 connection is managed by Http2Handler');
         Logger.info('  - No direct server socket verification needed');
       } else if (server != null) {
@@ -729,21 +782,25 @@ class _ClientHandler {
             0x00,
             0x00,
             0x00,
-            0x00
+            0x00,
           ];
           server!.add(pingData);
           Logger.info(
-              'HTTP/1 connection verification: PASSED - Ping sent successfully');
+            'HTTP/1 connection verification: PASSED - Ping sent successfully',
+          );
         } catch (e) {
           Logger.error(
-              'HTTP/1 connection verification: FAILED - Cannot send data: $e');
+            'HTTP/1 connection verification: FAILED - Cannot send data: $e',
+          );
           throw Exception(
-              'HTTP/1 connection verification failed - cannot send data: $e');
+            'HTTP/1 connection verification failed - cannot send data: $e',
+          );
         }
       } else {
         Logger.error('Connection verification: FAILED - No server connection');
         throw Exception(
-            'Connection verification failed - no server connection');
+          'Connection verification failed - no server connection',
+        );
       }
 
       Logger.info('=== End HTTP/2 Connection Verification ===');
@@ -766,7 +823,8 @@ class _ClientHandler {
             Logger.debug('HTTP/2 connection keep-alive check: OK');
           } else {
             Logger.warning(
-                'HTTP/2 connection keep-alive check: Connection lost');
+              'HTTP/2 connection keep-alive check: Connection lost',
+            );
             timer.cancel();
             close();
           }
@@ -864,7 +922,8 @@ class _ClientHandler {
       if (error.toString().contains('forcefully terminated') ||
           error.toString().contains('errorCode: 10')) {
         Logger.warning(
-            'HTTP/2 connection was forcefully terminated - this may be due to proxy configuration issues');
+          'HTTP/2 connection was forcefully terminated - this may be due to proxy configuration issues',
+        );
 
         // 尝试发送HTTP/2 GOAWAY帧
         await _sendHttp2GoAwayFrame();
@@ -915,10 +974,13 @@ class _ClientHandler {
       if (buffer.isNotEmpty) {
         Logger.error('  - Buffer preview: ${buffer.take(100).toList()}');
         try {
-          final bufferString =
-              utf8.decode(buffer.take(200).toList(), allowMalformed: true);
+          final bufferString = utf8.decode(
+            buffer.take(200).toList(),
+            allowMalformed: true,
+          );
           Logger.error(
-              '  - Buffer as string: ${bufferString.replaceAll('\n', '\\n').replaceAll('\r', '\\r')}');
+            '  - Buffer as string: ${bufferString.replaceAll('\n', '\\n').replaceAll('\r', '\\r')}',
+          );
         } catch (e) {
           Logger.error('  - Buffer decode error: $e');
         }
@@ -970,7 +1032,8 @@ class _ClientHandler {
     // 获取请求信息
     final requestInfo = _getRequestInfo();
 
-    final errorDetails = '''
+    final errorDetails =
+        '''
 HTTP/2 Connection Error
 Error: $errorMessage
 Time: $timestamp
@@ -1024,8 +1087,12 @@ Connection Details:
 
   /// 添加数据转发监控日志
   void _logDataForwarding(
-      String direction, int originalSize, int modifiedSize) {
+    String direction,
+    int originalSize,
+    int modifiedSize,
+  ) {
     Logger.debug(
-        'Data Forwarding: $direction - Original: $originalSize bytes, Modified: $modifiedSize bytes');
+      'Data Forwarding: $direction - Original: $originalSize bytes, Modified: $modifiedSize bytes',
+    );
   }
 }
