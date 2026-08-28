@@ -135,7 +135,9 @@ class PortUtils {
     // 如果向上突破也没有，向下突破范围寻找
     Logger.warning(
         'No available ports above $endPort, expanding search downward');
-    for (int port = startPort - 1; port >= startPort - maxAttempts && port > 0; port--) {
+    for (int port = startPort - 1;
+        port >= startPort - maxAttempts && port > 0;
+        port--) {
       if (await isPortAvailable(port)) {
         Logger.info('Found available port $port outside configured range');
         return port;
@@ -145,11 +147,11 @@ class PortUtils {
     // 如果所有尝试都失败，在剩余范围内查找（避免重复搜索已检查的范围）
     Logger.warning(
         'No available ports found in configured ranges, searching in remaining range');
-    
+
     // 计算已搜索的范围
     final searchedStart = max(1, startPort - maxAttempts);
     final searchedEnd = min(65535, endPort + maxAttempts);
-    
+
     // 在未搜索的范围内查找
     for (int port = 1; port < searchedStart; port++) {
       if (await isPortAvailable(port)) {
@@ -161,7 +163,7 @@ class PortUtils {
         break;
       }
     }
-    
+
     for (int port = searchedEnd + 1; port <= 65535; port++) {
       if (await isPortAvailable(port)) {
         Logger.info('Found available port $port in remaining range (high)');

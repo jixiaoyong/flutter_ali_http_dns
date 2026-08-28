@@ -35,7 +35,7 @@ abstract class FlutterAliHttpDnsPlatform extends PlatformInterface {
   }
 
   /// 清除DNS缓存
-  /// 
+  ///
   /// [hostNames] 可选的域名列表，如果提供则清除指定域名的缓存，否则清除所有缓存
   Future<bool> clearCache([List<String>? hostNames]) {
     throw UnimplementedError('clearCache() has not been implemented.');

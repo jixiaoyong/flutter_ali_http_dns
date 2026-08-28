@@ -75,17 +75,18 @@ class Logger {
   }
 
   /// 内部日志打印方法
-  static void _log(LogLevel level, String message, [Object? error, StackTrace? stackTrace]) {
+  static void _log(LogLevel level, String message,
+      [Object? error, StackTrace? stackTrace]) {
     final timestamp = DateTime.now().toIso8601String();
     final levelName = _getLevelName(level);
     final prefix = '[flutter_ali_http_dns] [$timestamp] [$levelName]';
-    
+
     print('$prefix $message');
-    
+
     if (error != null) {
       print('$prefix Error: $error');
     }
-    
+
     if (stackTrace != null) {
       print('$prefix StackTrace: $stackTrace');
     }

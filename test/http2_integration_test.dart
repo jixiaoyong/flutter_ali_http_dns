@@ -16,56 +16,56 @@ class Http2IntegrationTest {
   /// 运行所有 HTTP/2 测试
   static Future<void> runAllTests() async {
     print('🚀 HTTP/2 集成测试启动');
-    
+
     // 测试协议检测
     testProtocolDetection();
-    
+
     // 测试 HTTP/2 连接
     await testHttp2Connection();
-    
+
     // 测试 gRPC HTTP/2 连接
     await testGrpcHttp2Connection();
-    
+
     print('🎉 HTTP/2 集成测试完成');
   }
 
   /// 测试协议检测功能
   static void testProtocolDetection() {
     print('=== 测试协议检测 ===');
-    
+
     // 测试 HTTP/2 前言检测
     final http2Preface = 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n';
     final http2PrefaceBytes = utf8.encode(http2Preface);
-    
+
     print('HTTP/2前言: $http2Preface');
     print('前言字节长度: ${http2PrefaceBytes.length}');
-    
+
     // 测试协议检测
     final protocolType = ProtocolUtils.detectProtocol(http2Preface);
     print('协议检测结果: $protocolType');
-    
+
     // 测试非 HTTP/2 数据
     final nonHttp2Data = 'GET / HTTP/1.1\r\nHost: example.com\r\n\r\n';
     final nonHttp2Protocol = ProtocolUtils.detectProtocol(nonHttp2Data);
     print('非HTTP/2数据检测结果: $nonHttp2Protocol');
-    
+
     print('=== 协议检测完成 ===');
   }
 
   /// 测试 HTTP/2 连接
   static Future<void> testHttp2Connection() async {
     print('=== 开始 HTTP/2 连接测试 ===');
-    
+
     try {
       // 连接到目标服务器
       print('正在连接到目标服务器: $_testIp:$_testPort');
       final socket = await Socket.connect(_testIp, _testPort);
       print('✅ 连接成功建立');
-      
+
       // 创建 HTTP/2 客户端传输连接
       final transport = ClientTransportConnection.viaSocket(socket);
       print('✅ HTTP/2 传输连接创建成功');
-      
+
       // 创建请求头部，包含原始域名信息
       final headers = [
         Header.ascii(':method', 'GET'),
@@ -75,7 +75,7 @@ class Http2IntegrationTest {
         Header.ascii('user-agent', 'Http2Test/1.0'),
         Header.ascii('accept', '*/*'),
       ];
-      
+
       print('📤 发送 HTTP/2 请求');
       print('   原始域名: $_testDomain');
       print('   目标IP: $_testIp');
@@ -85,10 +85,10 @@ class Http2IntegrationTest {
         final value = utf8.decode(header.value);
         print('     $name: $value');
       }
-      
+
       // 发送请求
       final stream = transport.makeRequest(headers, endStream: true);
-      
+
       // 监听响应
       stream.incomingMessages.listen(
         (message) {
@@ -111,37 +111,36 @@ class Http2IntegrationTest {
           print('✅ 响应接收完成');
         },
       );
-      
+
       // 等待响应
       print('⏳ 等待服务器响应...');
       await Future.delayed(Duration(seconds: 5));
-      
+
       // 关闭连接
       await transport.finish();
       await socket.close();
       print('✅ 连接已关闭');
-      
     } catch (e) {
       print('❌ HTTP/2 连接测试失败: $e');
     }
-    
+
     print('=== HTTP/2 连接测试完成 ===');
   }
 
   /// 测试 gRPC HTTP/2 连接
   static Future<void> testGrpcHttp2Connection() async {
     print('=== 开始 gRPC HTTP/2 连接测试 ===');
-    
+
     try {
       // 连接到目标服务器
       print('正在连接到目标服务器: $_testIp:$_testPort');
       final socket = await Socket.connect(_testIp, _testPort);
       print('✅ 连接成功建立');
-      
+
       // 创建 HTTP/2 客户端传输连接
       final transport = ClientTransportConnection.viaSocket(socket);
       print('✅ HTTP/2 传输连接创建成功');
-      
+
       // 创建 gRPC 请求头部
       final headers = [
         Header.ascii(':method', 'POST'),
@@ -154,7 +153,7 @@ class Http2IntegrationTest {
         Header.ascii('grpc-encoding', 'gzip'),
         Header.ascii('grpc-accept-encoding', 'gzip,deflate'),
       ];
-      
+
       print('📤 发送 gRPC HTTP/2 请求');
       print('   原始域名: $_testDomain');
       print('   目标IP: $_testIp');
@@ -165,15 +164,15 @@ class Http2IntegrationTest {
         final value = utf8.decode(header.value);
         print('     $name: $value');
       }
-      
+
       // 发送请求头部
       final stream = transport.makeRequest(headers, endStream: false);
-      
+
       // 发送 gRPC 数据（简单的测试数据）
       final grpcData = _createGrpcData('{"test": "hello world"}');
       stream.sendData(grpcData, endStream: true);
       print('📤 发送 gRPC 数据: ${grpcData.length} 字节');
-      
+
       // 监听响应
       stream.incomingMessages.listen(
         (message) {
@@ -195,20 +194,19 @@ class Http2IntegrationTest {
           print('✅ 响应接收完成');
         },
       );
-      
+
       // 等待响应
       print('⏳ 等待服务器响应...');
       await Future.delayed(Duration(seconds: 5));
-      
+
       // 关闭连接
       await transport.finish();
       await socket.close();
       print('✅ 连接已关闭');
-      
     } catch (e) {
       print('❌ gRPC HTTP/2 连接测试失败: $e');
     }
-    
+
     print('=== gRPC HTTP/2 连接测试完成 ===');
   }
 
@@ -216,7 +214,7 @@ class Http2IntegrationTest {
   static List<int> _createGrpcData(String jsonData) {
     final data = utf8.encode(jsonData);
     final length = data.length;
-    
+
     // gRPC 数据帧格式: [1 byte flag][4 bytes length][data]
     final frame = <int>[
       0, // flag (0 = data frame)
@@ -226,7 +224,7 @@ class Http2IntegrationTest {
       length & 0xFF,
       ...data, // 实际数据
     ];
-    
+
     return frame;
   }
 
@@ -235,7 +233,7 @@ class Http2IntegrationTest {
     if (bytes.length < 5) {
       throw FormatException('Invalid gRPC frame: too short');
     }
-    
+
     // 跳过帧头 (1 byte flag + 4 bytes length)
     final data = bytes.sublist(5);
     return utf8.decode(data, allowMalformed: true);

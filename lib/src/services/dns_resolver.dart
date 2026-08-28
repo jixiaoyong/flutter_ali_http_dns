@@ -96,8 +96,8 @@ class DnsResolver {
         );
 
         // 直接调用平台方法，避免循环调用
-        final String? ip = await FlutterAliHttpDnsPlatform.instance
-            .resolveDomain(domain);
+        final String? ip =
+            await FlutterAliHttpDnsPlatform.instance.resolveDomain(domain);
 
         if (ip != null && ip.isNotEmpty) {
           // 成功解析，重置重试计数

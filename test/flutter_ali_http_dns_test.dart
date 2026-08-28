@@ -27,7 +27,8 @@ void main() {
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       );
 
-      expect(defaultConfig.accountId, equals(credentials.AliHttpDnsCredentials.accountId));
+      expect(defaultConfig.accountId,
+          equals(credentials.AliHttpDnsCredentials.accountId));
       expect(defaultConfig.enableCache, isTrue);
       expect(defaultConfig.maxCacheSize, equals(100));
       expect(defaultConfig.preloadDomains, isEmpty);
@@ -79,7 +80,8 @@ void main() {
 
       final dnsJson = dnsConfig.toJson();
       final dnsConfigFromJson = DnsConfig.fromJson(dnsJson);
-      expect(dnsConfigFromJson.accountId, equals(credentials.AliHttpDnsCredentials.accountId));
+      expect(dnsConfigFromJson.accountId,
+          equals(credentials.AliHttpDnsCredentials.accountId));
       expect(dnsConfigFromJson.enableCache, isFalse);
 
       // 测试 ProxyConfig JSON 序列化
@@ -101,7 +103,7 @@ void main() {
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
         accessKeySecret: credentials.AliHttpDnsCredentials.accessKeySecret,
       );
-      
+
       const config2 = DnsConfig(
         accountId: credentials.AliHttpDnsCredentials.accountId,
         accessKeyId: credentials.AliHttpDnsCredentials.accessKeyId,
