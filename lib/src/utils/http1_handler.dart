@@ -48,7 +48,8 @@ class Http1Handler {
       Logger.info('  - Domain to resolve: $mappedHost');
 
       final ip = await dnsResolver.resolve(mappedHost);
-      final targetIp = (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
+      final targetIp =
+          (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
 
       Logger.info('  - Resolved IP: $targetIp');
       Logger.info('  - Final target: $targetIp:$mappedPort');
@@ -203,7 +204,8 @@ class Http1Handler {
 
       // DNS 解析
       final ip = await dnsResolver.resolve(mappedHost);
-      final targetIp = (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
+      final targetIp =
+          (ip != null && ip.isNotEmpty && ip != mappedHost) ? ip : mappedHost;
 
       Logger.info(
           'WebSocket proxy resolution: $host:$port -> $targetIp:$mappedPort');
@@ -220,8 +222,7 @@ class Http1Handler {
           timeout: const Duration(seconds: 10));
 
       // 转发WebSocket握手请求到服务器，移除代理专用头防止泄漏。
-      serverSocket.add(
-          utf8.encode(_stripProxyHeaders(requestString)));
+      serverSocket.add(utf8.encode(_stripProxyHeaders(requestString)));
 
       Logger.debug('WebSocket connection established to $targetIp:$mappedPort');
 
@@ -274,91 +275,20 @@ class Http1Handler {
           modifiedLines.add(line);
           Logger.debug('Keeping original Host header: ${line.substring(6)}');
         }
+      } else if (line.toLowerCase().startsWith('connection:')) {
+        modifiedLines.add('Connection: close');
       } else {
         modifiedLines.add(line);
       }
     }
 
+    if (!modifiedLines.any(
+      (line) => line.toLowerCase().startsWith('connection:'),
+    )) {
+      final emptyIndex = modifiedLines.indexOf('');
+      modifiedLines.insert(emptyIndex < 0 ? modifiedLines.length : emptyIndex,
+          'Connection: close');
+    }
     return modifiedLines.join('\r\n');
-  }
-
-  /// 设置双向转发
-  static void _setupBidirectionalForwarding(Socket client, Socket server) {
-    bool clientClosed = false;
-    bool serverClosed = false;
-    int clientToServerBytes = 0;
-    int serverToClientBytes = 0;
-
-    Logger.info('=== Bidirectional Forwarding Setup ===');
-    Logger.info('Starting data forwarding between client and server');
-
-    // 客户端到服务器
-    client.listen(
-      (data) {
-        if (!serverClosed) {
-          try {
-            clientToServerBytes += data.length;
-            server.add(data);
-            Logger.debug(
-                'Client -> Server: ${data.length} bytes (Total: $clientToServerBytes)');
-          } catch (e) {
-            Logger.error('Error forwarding data from client to server', e);
-            _closeConnections(client, server);
-          }
-        }
-      },
-      onError: (error) {
-        Logger.error('Client to server forwarding error', error);
-        _closeConnections(client, server);
-      },
-      onDone: () {
-        Logger.info(
-            'Client connection closed (Total bytes sent: $clientToServerBytes)');
-        clientClosed = true;
-        _closeConnections(client, server);
-      },
-    );
-
-    // 服务器到客户端
-    server.listen(
-      (data) {
-        if (!clientClosed) {
-          try {
-            serverToClientBytes += data.length;
-            client.add(data);
-            Logger.debug(
-                'Server -> Client: ${data.length} bytes (Total: $serverToClientBytes)');
-          } catch (e) {
-            Logger.error('Error forwarding data from server to client', e);
-            _closeConnections(client, server);
-          }
-        }
-      },
-      onError: (error) {
-        Logger.error('Server to client forwarding error', error);
-        _closeConnections(client, server);
-      },
-      onDone: () {
-        Logger.info(
-            'Server connection closed (Total bytes sent: $serverToClientBytes)');
-        serverClosed = true;
-        _closeConnections(client, server);
-      },
-    );
-  }
-
-  /// 关闭连接
-  static void _closeConnections(Socket client, Socket server) {
-    try {
-      client.close();
-    } catch (e) {
-      Logger.debug('Error closing client connection: $e');
-    }
-
-    try {
-      server.close();
-    } catch (e) {
-      Logger.debug('Error closing server connection: $e');
-    }
   }
 }

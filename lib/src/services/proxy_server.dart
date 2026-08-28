@@ -15,8 +15,8 @@ abstract final class ProxyLimits {
   /// 请求头最大字节数（含请求行与各头，64 KiB）。
   static const int maxHeaderBytes = 64 * 1024;
 
-  /// 请求头读取超时（10 秒）。
-  static const Duration headerReadTimeout = Duration(seconds: 10);
+  /// 未鉴权请求头读取超时（2 秒）。
+  static const Duration headerReadTimeout = Duration(seconds: 2);
 
   /// HTTP/HTTPS/WebSocket 上游连接建立超时（10 秒）。
   static const Duration upstreamConnectTimeout = Duration(seconds: 10);
@@ -31,8 +31,7 @@ abstract final class ProxySecurityConstants {
   static const Duration headerReadTimeout = ProxyLimits.headerReadTimeout;
   static const Duration upstreamConnectTimeout =
       ProxyLimits.upstreamConnectTimeout;
-  static const int maxUpstreamBufferBytes =
-      ProxyLimits.maxUpstreamBufferBytes;
+  static const int maxUpstreamBufferBytes = ProxyLimits.maxUpstreamBufferBytes;
 }
 
 /// 支持 HTTPDNS 的代理服务器
@@ -52,20 +51,21 @@ class ProxyServer {
   ProxyCredentials _credentials = ProxyCredentials.generate();
   ProxyCredentials get credentials => _credentials;
 
-  // 活动客户端连接（用于 stop() 时先清理，防止连接悬挂）
-  final Set<_ClientHandler> _activeClients = {};
+  // 连接槽按实例隔离：未鉴权连接不能占用已鉴权连接容量。
+  static const int _maxPendingAuthClients = 16;
+  static const int _maxAuthenticatedClients = 128;
+  final Set<_ClientHandler> _pendingAuthClients = {};
+  final Set<_ClientHandler> _authenticatedClients = {};
 
-  // 全局最大并发客户端数
-  static const int _maxConcurrentClients = 128;
-
-  // 当前进程内全局并发客户端计数
-  static int _activeClientCount = 0;
+  /// 仅用于状态观测/测试的只读计数。
+  int get pendingAuthClientCount => _pendingAuthClients.length;
+  int get authenticatedClientCount => _authenticatedClients.length;
 
   static ProxyServer? _instance;
   static final Map<int, ProxyServer> _instancesByPort = {};
 
   ProxyServer({required this.config, required DnsResolver dnsResolver})
-    : _dnsResolver = dnsResolver;
+      : _dnsResolver = dnsResolver;
 
   /// 启动默认代理服务器（监听单个端口）
   ///
@@ -112,6 +112,9 @@ class ProxyServer {
 
       // 创建服务器socket并开始监听
       await _createServerSocket(port);
+
+      // 注册到实例映射，使 stopAll()/getInstanceByPort() 可见。
+      _instancesByPort[port] = this;
 
       _isRunning = true;
       Logger.info(
@@ -160,17 +163,14 @@ class ProxyServer {
 
     serverSocket.listen(
       (client) {
-        if (_activeClientCount >= _maxConcurrentClients) {
+        if (_pendingAuthClients.length >= _maxPendingAuthClients) {
           Logger.warning(
-            'Rejecting client connection: max concurrent clients '
-            '($_maxConcurrentClients) reached',
-          );
+              'Rejecting client: pending authentication limit reached');
           _rejectClient(client);
           return;
         }
-        _activeClientCount++;
         final handler = _ClientHandler(client, this, port);
-        _activeClients.add(handler);
+        _pendingAuthClients.add(handler);
         handler.handle().catchError((Object error) {
           Logger.error('Client handler error on port $port', error);
           handler.close();
@@ -199,7 +199,7 @@ class ProxyServer {
       // 忽略写入失败，直接关闭
     }
     try {
-      client.destroy();
+      client.close();
     } catch (_) {
       // 忽略关闭失败
     }
@@ -210,16 +210,20 @@ class ProxyServer {
   /// 顺序：先关闭/清理全部活动客户端连接，再释放端口映射，
   /// 最后清空 instances 与端口记录，避免残留 socket 悬挂。
   Future<void> stop() async {
-    Logger.info('Stopping proxy server (${_activeClients.length} active '
-        'client connections)');
+    Logger.info('Stopping proxy server '
+        '(${_pendingAuthClients.length} pending, '
+        '${_authenticatedClients.length} authenticated)');
 
     // 1. 先清理全部活动连接
-    final clients = List<_ClientHandler>.from(_activeClients);
+    final clients = <_ClientHandler>{
+      ..._pendingAuthClients,
+      ..._authenticatedClients,
+    };
     for (final handler in clients) {
       handler.close();
     }
-    _activeClients.clear();
-    _activeClientCount = 0;
+    _pendingAuthClients.clear();
+    _authenticatedClients.clear();
 
     // 2. 再关闭监听 socket，释放端口
     await _closeAllServerSockets();
@@ -303,6 +307,20 @@ class ProxyServer {
   /// 获取所有运行的端口
   static List<int> getRunningPorts() {
     return _instancesByPort.keys.toList();
+  }
+
+  /// 第一个监听 socket 的绑定地址。
+  ///
+  /// 安全约束要求仅绑定 loopbackIPv4，供测试与宿主 App 校验。
+  InternetAddress? get bindAddress {
+    if (_serverSockets.isEmpty) {
+      return null;
+    }
+    try {
+      return _serverSockets.first.address;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 获取当前分配的端口列表
@@ -444,11 +462,13 @@ class _ClientHandler {
   StreamSubscription? serverSubscription;
   Timer? _headerTimeout;
   int _clientSentBytes = 0;
+  String? _pendingHttpRequest;
+  int _pendingHttpBodyBytes = 0;
 
   _ClientHandler(this.client, this.proxyServer, this.serverPort);
 
   Future<void> handle() async {
-    // 请求头读取超时（10 秒），超时返回 408 并关闭连接。
+    // 未鉴权请求头读取超时（2 秒），防止静默连接耗尽 pending 槽。
     _startHeaderTimeout();
 
     // 直接使用client.listen，避免asBroadcastStream的问题
@@ -456,6 +476,17 @@ class _ClientHandler {
       (data) async {
         try {
           if (server == null) {
+            if (_pendingHttpRequest != null) {
+              buffer.addAll(data);
+              if (buffer.length >= _pendingHttpBodyBytes) {
+                final request = _pendingHttpRequest!;
+                _pendingHttpRequest = null;
+                final body = buffer.sublist(0, _pendingHttpBodyBytes);
+                buffer.clear();
+                await _forwardHttpRequest(request, body);
+              }
+              return;
+            }
             _clientSentBytes += data.length;
 
             // 请求头缓冲上限 64 KiB，超限直接 431 并断开，不继续累积。
@@ -519,101 +550,30 @@ class _ClientHandler {
                   }
                   break;
 
-              case ProtocolType.websocket:
-                if (!_isWebSocket) {
-                  if (!_authorizeRequest(requestString)) {
-                    _rejectUnauthorized();
-                    return;
-                  }
-                  // 避免重复处理
-                  _isWebSocket = true;
-                  final serverSocket =
-                      await Http1Handler.handleWebSocketRequest(
-                        client,
-                        requestString,
-                        proxyServer._dnsResolver,
-                        proxyServer,
-                      );
-                  if (serverSocket == null) {
-                    throw Exception('Failed to handle WebSocket request');
-                  }
-
-                  // 设置服务器连接，并转发解析请求头期间缓存的剩余数据。
-                  server = serverSocket;
-                  _flushPendingClientData();
-
-                  // 设置服务器端数据监听（用于WebSocket双向转发）
-                  if (server != null) {
-                    serverSubscription = server!.listen(
-                      (data) {
-                        try {
-                          if (_checkUpstreamLimit(data.length)) {
-                            Logger.warning(
-                              'Upstream buffer exceeded limit, closing '
-                              'WebSocket connection',
-                            );
-                            close();
-                            return;
-                          }
-                          Logger.debug(
-                            'Server -> Client (WebSocket): ${data.length} bytes',
-                          );
-                          client.add(data);
-                          _logDataForwarding(
-                            'Server -> Client',
-                            data.length,
-                            data.length,
-                          );
-                        } catch (e) {
-                          Logger.error(
-                            'Client socket error during server->client forwarding',
-                            e,
-                          );
-                          close();
-                        }
-                      },
-                      onError: (error) {
-                        Logger.error('Server socket error', error);
-                        close();
-                      },
-                      onDone: () {
-                        Logger.debug('Server connection closed');
-                        close();
-                      },
-                    );
-                  }
-                  return;
-                }
-                break;
-
-              case ProtocolType.https:
-                if (!_isHttps) {
-                  if (!_authorizeRequest(requestString)) {
-                    _rejectUnauthorized();
-                    return;
-                  }
-                  // 避免重复处理
-                  _isHttps = true;
-                  final connectMatch = RegExp(
-                    r'CONNECT ([^ :]+):(\d+)',
-                  ).firstMatch(requestString);
-                  if (connectMatch != null) {
+                case ProtocolType.websocket:
+                  if (!_isWebSocket) {
+                    if (!_authorizeRequest(requestString)) {
+                      _rejectUnauthorized();
+                      return;
+                    }
+                    // 避免重复处理
+                    _isWebSocket = true;
                     final serverSocket =
-                        await Http1Handler.handleConnectRequest(
-                          client,
-                          connectMatch,
-                          proxyServer._dnsResolver,
-                          proxyServer,
-                        );
+                        await Http1Handler.handleWebSocketRequest(
+                      client,
+                      requestString,
+                      proxyServer._dnsResolver,
+                      proxyServer,
+                    );
                     if (serverSocket == null) {
-                      throw Exception('Failed to handle HTTPS CONNECT request');
+                      throw Exception('Failed to handle WebSocket request');
                     }
 
-                    // 设置服务器连接，并转发 CONNECT 建连期间缓存的数据。
+                    // 设置服务器连接，并转发解析请求头期间缓存的剩余数据。
                     server = serverSocket;
                     _flushPendingClientData();
 
-                    // 设置服务器端数据监听（用于HTTPS双向转发）
+                    // 设置服务器端数据监听（用于WebSocket双向转发）
                     if (server != null) {
                       serverSubscription = server!.listen(
                         (data) {
@@ -621,13 +581,13 @@ class _ClientHandler {
                             if (_checkUpstreamLimit(data.length)) {
                               Logger.warning(
                                 'Upstream buffer exceeded limit, closing '
-                                'HTTPS tunnel',
+                                'WebSocket connection',
                               );
                               close();
                               return;
                             }
                             Logger.debug(
-                              'Server -> Client (HTTPS): ${data.length} bytes',
+                              'Server -> Client (WebSocket): ${data.length} bytes',
                             );
                             client.add(data);
                             _logDataForwarding(
@@ -655,124 +615,209 @@ class _ClientHandler {
                     }
                     return;
                   }
-                }
-                break;
+                  break;
 
-              case ProtocolType.http:
-                if (!_isHttps && !_isHttp2 && !_isWebSocket) {
-                  if (!_authorizeRequest(requestString)) {
-                    _rejectUnauthorized();
+                case ProtocolType.https:
+                  if (!_isHttps) {
+                    if (!_authorizeRequest(requestString)) {
+                      _rejectUnauthorized();
+                      return;
+                    }
+                    // 避免重复处理
+                    _isHttps = true;
+                    final connectMatch = RegExp(
+                      r'CONNECT ([^ :]+):(\d+)',
+                    ).firstMatch(requestString);
+                    if (connectMatch != null) {
+                      final serverSocket =
+                          await Http1Handler.handleConnectRequest(
+                        client,
+                        connectMatch,
+                        proxyServer._dnsResolver,
+                        proxyServer,
+                      );
+                      if (serverSocket == null) {
+                        throw Exception(
+                            'Failed to handle HTTPS CONNECT request');
+                      }
+
+                      // 设置服务器连接，并转发 CONNECT 建连期间缓存的数据。
+                      server = serverSocket;
+                      _flushPendingClientData();
+
+                      // 设置服务器端数据监听（用于HTTPS双向转发）
+                      if (server != null) {
+                        serverSubscription = server!.listen(
+                          (data) {
+                            try {
+                              if (_checkUpstreamLimit(data.length)) {
+                                Logger.warning(
+                                  'Upstream buffer exceeded limit, closing '
+                                  'HTTPS tunnel',
+                                );
+                                close();
+                                return;
+                              }
+                              Logger.debug(
+                                'Server -> Client (HTTPS): ${data.length} bytes',
+                              );
+                              client.add(data);
+                              _logDataForwarding(
+                                'Server -> Client',
+                                data.length,
+                                data.length,
+                              );
+                            } catch (e) {
+                              Logger.error(
+                                'Client socket error during server->client forwarding',
+                                e,
+                              );
+                              close();
+                            }
+                          },
+                          onError: (error) {
+                            Logger.error('Server socket error', error);
+                            close();
+                          },
+                          onDone: () {
+                            Logger.debug('Server connection closed');
+                            close();
+                          },
+                        );
+                      }
+                      return;
+                    }
+                  }
+                  break;
+
+                case ProtocolType.http:
+                  if (!_isHttps && !_isHttp2 && !_isWebSocket) {
+                    if (!_authorizeRequest(requestString)) {
+                      _rejectUnauthorized();
+                      return;
+                    }
+                    final transferEncoding =
+                        _extractHeaderValue(requestString, 'Transfer-Encoding');
+                    if (transferEncoding != null &&
+                        transferEncoding.isNotEmpty) {
+                      _sendAndClose(
+                        'HTTP/1.1 501 Not Implemented\r\n'
+                        'Connection: close\r\n'
+                        'Content-Length: 0\r\n\r\n',
+                      );
+                      return;
+                    }
+                    final contentLengthValue =
+                        _extractHeaderValue(requestString, 'Content-Length');
+                    final contentLength =
+                        int.tryParse(contentLengthValue ?? '0');
+                    if (contentLength == null || contentLength < 0) {
+                      _sendAndClose(
+                        'HTTP/1.1 400 Bad Request\r\n'
+                        'Connection: close\r\n'
+                        'Content-Length: 0\r\n\r\n',
+                      );
+                      return;
+                    }
+                    if (buffer.length < contentLength) {
+                      _pendingHttpRequest = requestString;
+                      _pendingHttpBodyBytes = contentLength;
+                      return;
+                    }
+                    final body = buffer.sublist(0, contentLength);
+                    buffer.clear(); // 丢弃同包流水线中的第二个请求。
+                    await _forwardHttpRequest(requestString, body);
                     return;
                   }
-                  // 避免重复处理
-                  final httpMatch = RegExp(
-                    r'^([A-Z]+) ([^ ]+) HTTP/',
-                  ).firstMatch(requestString);
-                  if (httpMatch != null) {
-                    final serverSocket = await Http1Handler.handleHttpRequest(
-                      client,
-                      httpMatch,
-                      requestString,
-                      proxyServer._dnsResolver,
-                      proxyServer,
+                  break;
+
+                case ProtocolType.unknown:
+                  // 只有在没有其他协议标记时才报告未知协议
+                  if (!_isHttps && !_isHttp2 && !_isWebSocket) {
+                    if (!_isAuthenticated &&
+                        !_looksLikeAuthRequest(requestString)) {
+                      _rejectUnauthorized();
+                      return;
+                    }
+                    Logger.warning(
+                      'Unrecognized protocol: ${requestString.split('\n').first}',
                     );
-                    if (serverSocket == null) {
-                      throw Exception('Failed to handle HTTP request');
-                    }
-
-                    // 设置服务器连接，并转发请求头后同包到达或建连期间缓存的 body。
-                    server = serverSocket;
-                    _flushPendingClientData();
-
-                    // 设置服务器端数据监听（用于HTTP双向转发）
-                    if (server != null) {
-                      serverSubscription = server!.listen(
-                        (data) {
-                          try {
-                            if (_checkUpstreamLimit(data.length)) {
-                              Logger.warning(
-                                'Upstream buffer exceeded limit, closing HTTP '\
-                                'connection',
-                              );
-                              close();
-                              return;
-                            }
-                            Logger.debug(
-                              'Server -> Client (HTTP): ${data.length} bytes',
-                            );
-                            client.add(data);
-                            _logDataForwarding(
-                              'Server -> Client',
-                              data.length,
-                              data.length,
-                            );
-                          } catch (e) {
-                            Logger.error(
-                              'Client socket error during server->client forwarding',
-                              e,
-                            );
-                            close();
-                          }
-                        },
-                        onError: (error) {
-                          Logger.error('Server socket error', error);
-                          close();
-                        },
-                        onDone: () {
-                          Logger.debug('Server connection closed');
-                          close();
-                        },
-                      );
-                    }
+                    close();
                     return;
                   }
-                }
-                break;
+                  break;
+              }
+            }
+          } else {
+            // 数据转发
+            try {
+              if (_isHttp2) {
+                // HTTP/2数据：直接转发，不修改
+                Logger.debug('Client -> Server (HTTP/2): ${data.length} bytes');
+                server?.add(data);
 
-              case ProtocolType.unknown:
-                // 只有在没有其他协议标记时才报告未知协议
-                if (!_isHttps && !_isHttp2 && !_isWebSocket) {
-                  if (!_isAuthenticated && !_looksLikeAuthRequest(requestString)) {
-                    _rejectUnauthorized();
-                    return;
-                  }
-                  Logger.warning(
-                    'Unrecognized protocol: ${requestString.split('\n').first}',
-                  );
-                  close();
-                  return;
-                }
-                break;
+                // 添加数据转发监控
+                _logDataForwarding(
+                    'Client -> Server', data.length, data.length);
+              } else {
+                // 其他协议直接转发
+                Logger.debug('Client -> Server (other): ${data.length} bytes');
+                server?.add(data);
+
+                // 添加数据转发监控
+                _logDataForwarding(
+                    'Client -> Server', data.length, data.length);
+              }
+            } catch (e) {
+              Logger.error('Server socket error', e);
+              close();
             }
           }
-        } else {
-          // 数据转发
-          try {
-            if (_isHttp2) {
-              // HTTP/2数据：直接转发，不修改
-              Logger.debug('Client -> Server (HTTP/2): ${data.length} bytes');
-              server?.add(data);
-
-              // 添加数据转发监控
-              _logDataForwarding('Client -> Server', data.length, data.length);
-            } else {
-              // 其他协议直接转发
-              Logger.debug('Client -> Server (other): ${data.length} bytes');
-              server?.add(data);
-
-              // 添加数据转发监控
-              _logDataForwarding('Client -> Server', data.length, data.length);
-            }
-          } catch (e) {
-            Logger.error('Server socket error', e);
-            close();
-          }
+        } catch (e) {
+          Logger.error('Client request handling error', e);
+          close();
         }
       },
       onError: (error) {
         Logger.error('Client socket error', error);
         close();
       },
+      onDone: close,
+    );
+  }
+
+  /// 普通 HTTP 严格一请求一连接：收齐首请求 body 后取消客户端读取，
+  /// 后续 keep-alive/流水线字节不会进入上游。
+  Future<void> _forwardHttpRequest(String requestString, List<int> body) async {
+    await clientSubscription?.cancel();
+    final httpMatch =
+        RegExp(r'^([A-Z]+) ([^ ]+) HTTP/').firstMatch(requestString);
+    if (httpMatch == null) {
+      close();
+      return;
+    }
+    final serverSocket = await Http1Handler.handleHttpRequest(
+      client,
+      httpMatch,
+      requestString,
+      proxyServer._dnsResolver,
+      proxyServer,
+    );
+    if (serverSocket == null) {
+      close();
+      return;
+    }
+    server = serverSocket;
+    if (body.isNotEmpty) server!.add(body);
+    serverSubscription = server!.listen(
+      (data) {
+        if (_checkUpstreamLimit(data.length)) {
+          close();
+          return;
+        }
+        client.add(data);
+      },
+      onError: (_) => close(),
       onDone: close,
     );
   }
@@ -798,13 +843,21 @@ class _ClientHandler {
   /// （如 HTTP/2 升级或 CONNECT 隧道）无需重复认证。
   bool _authorizeRequest(String requestString) {
     final credentials = proxyServer.credentials;
-    if (credentials == null) {
-      Logger.error('Proxy credentials not available, rejecting request');
-      return false;
-    }
 
     final authValue = _extractHeaderValue(requestString, 'Proxy-Authorization');
     if (credentials.validate(authValue)) {
+      if (_isAuthenticated) return true;
+      if (proxyServer._authenticatedClients.length >=
+          ProxyServer._maxAuthenticatedClients) {
+        _sendAndClose(
+          'HTTP/1.1 503 Service Unavailable\r\n'
+          'Connection: close\r\n'
+          'Content-Length: 0\r\n\r\n',
+        );
+        return false;
+      }
+      if (!proxyServer._pendingAuthClients.remove(this)) return false;
+      proxyServer._authenticatedClients.add(this);
       _isAuthenticated = true;
       return true;
     }
@@ -822,11 +875,10 @@ class _ClientHandler {
   void _rejectUnauthorized() {
     _headerTimeout?.cancel();
     _headerTimeout = null;
-    final realm = proxyServer.credentials?.authenticateHeaderValue() ??
-        'Basic realm="httpdns-proxy"';
+    final realm = proxyServer.credentials.authenticateHeaderValue();
     _sendAndClose(
       'HTTP/1.1 407 Proxy Authentication Required\r\n'
-      '$realm\r\n'
+      '${ProxyCredentials.authenticateHeaderName}: $realm\r\n'
       'Connection: close\r\n'
       'Content-Length: 0\r\n'
       '\r\n',
@@ -930,20 +982,19 @@ class _ClientHandler {
     while (retryCount <= maxRetries) {
       try {
         // 使用Http2Handler处理HTTP/2连接，添加超时
-        final success =
-            await Http2Handler.handleHttp2Connection(
-              clientSocket,
-              serverPort,
-              proxyServer._dnsResolver,
-              initialData: initialData,
-            ).timeout(
-              const Duration(seconds: 30),
-              onTimeout: () {
-                throw TimeoutException(
-                  'HTTP/2 connection timeout after 30 seconds',
-                );
-              },
+        final success = await Http2Handler.handleHttp2Connection(
+          clientSocket,
+          serverPort,
+          proxyServer._dnsResolver,
+          initialData: initialData,
+        ).timeout(
+          const Duration(seconds: 30),
+          onTimeout: () {
+            throw TimeoutException(
+              'HTTP/2 connection timeout after 30 seconds',
             );
+          },
+        );
 
         if (!success) {
           throw Exception('Failed to handle HTTP/2 connection');
@@ -1117,11 +1168,7 @@ class _ClientHandler {
       if (_isHttp2) {
         // 对于HTTP/2连接，检查客户端连接状态
         // 尝试访问客户端socket属性来检查连接状态
-        if (client != null) {
-          // 如果客户端socket仍然可用，说明连接仍然活跃
-          return false;
-        }
-        return true;
+        return false;
       } else if (server != null) {
         // 对于HTTP/1连接，检查服务器连接状态
         // 如果socket为null或无法访问，说明连接已关闭
@@ -1299,8 +1346,7 @@ class _ClientHandler {
     // 获取请求信息
     final requestInfo = _getRequestInfo();
 
-    final errorDetails =
-        '''
+    final errorDetails = '''
 HTTP/2 Connection Error
 Error: $errorMessage
 Time: $timestamp
@@ -1355,9 +1401,8 @@ Connection Details:
       server = null;
       buffer.clear();
 
-      if (proxyServer._activeClients.remove(this)) {
-        ProxyServer._activeClientCount--;
-      }
+      proxyServer._pendingAuthClients.remove(this);
+      proxyServer._authenticatedClients.remove(this);
       Logger.debug('Connection closed successfully');
     } catch (e) {
       Logger.error('Error closing connection', e);
@@ -1372,7 +1417,7 @@ Connection Details:
     if (_upstreamBytes > ProxyLimits.maxUpstreamBufferBytes) {
       Logger.warning(
         'Upstream response buffer exceeded limit '
-        '(${_upstreamBytes} > ${ProxyLimits.maxUpstreamBufferBytes}), '
+        '($_upstreamBytes > ${ProxyLimits.maxUpstreamBufferBytes}), '
         'closing connection',
       );
       return true;

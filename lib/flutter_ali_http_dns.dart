@@ -419,16 +419,25 @@ class FlutterAliHttpDns {
         // 使 dart:io 在代理返回 407 + Proxy-Authenticate 挑战时自动
         // 附上对应凭据，避免由调用方手工拼 Proxy-Authorization 头。
         final credentials = _proxyServer!.credentials;
-        final proxyUri = Uri.parse(address.startsWith('http')
-            ? address
-            : 'http://$address');
+        final address = await getProxyAddress();
+        if (address == null) return false;
+        final separator = address.lastIndexOf(':');
+        if (separator <= 0) return false;
+        final proxyHost = address.substring(0, separator);
+        final proxyPort = int.tryParse(address.substring(separator + 1));
+        if (proxyPort == null) return false;
         client.addProxyCredentials(
+          proxyHost,
+          proxyPort,
           ProxyCredentials.realm,
-          proxyUri,
-          credentials.username,
-          credentials.token,
+          HttpClientBasicCredentials(credentials.username, credentials.token),
         );
-        client.authenticateProxy = (uri, scheme, realm) => true;
+        client.authenticateProxy = (host, port, scheme, realm) async {
+          return host == proxyHost &&
+              port == proxyPort &&
+              scheme.toLowerCase() == 'basic' &&
+              realm == ProxyCredentials.realm;
+        };
 
         Logger.info('HttpClient configured with proxy: $proxyConfig');
         return true;
