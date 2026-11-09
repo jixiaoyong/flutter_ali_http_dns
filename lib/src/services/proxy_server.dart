@@ -484,9 +484,10 @@ class _ClientHandler {
               }
               return;
             }
-            _clientSentBytes += data.length;
-
-            // 请求头缓冲上限 64 KiB，超限直接 431 并断开，不继续累积。
+            buffer.addAll(data);
+            final headerEnd = _findHttpRequestEnd();
+            // 只统计头部边界，不能把同一 socket 事件中的 body 算入请求头。
+            _clientSentBytes = headerEnd < 0 ? buffer.length : headerEnd;
             if (_clientSentBytes > ProxyLimits.maxHeaderBytes) {
               _headerTimeout?.cancel();
               _headerTimeout = null;
@@ -498,8 +499,6 @@ class _ClientHandler {
               );
               return;
             }
-
-            buffer.addAll(data);
 
             // 尝试解析请求头
             final requestString = _tryDecodeBuffer();

@@ -145,6 +145,34 @@ void main() {
     await target.close(force: true);
   });
 
+  for (final fragmented in [false, true]) {
+    test('large same-event body excludes header limit fragmented=$fragmented', () async {
+      final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => target.close(force: true));
+      final received = Completer<int>();
+      target.listen((request) async {
+        received.complete(await request.fold<int>(0, (sum, data) => sum + data.length));
+        await request.response.close();
+      });
+      final (proxy, port, credentials) = await _startProxy();
+      addTearDown(proxy.stop);
+      final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+      addTearDown(socket.destroy);
+      socket.listen((_) {});
+      final header = 'POST http://127.0.0.1:${target.port}/ HTTP/1.1\r\n'
+          'Host: 127.0.0.1\r\nProxy-Authorization: ${credentials.basicAuthValue()}\r\n'
+          'Content-Length: 131072\r\n\r\n';
+      if (fragmented) {
+        socket.add(utf8.encode(header.substring(0, 20)));
+        await socket.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      socket.add(utf8.encode('${fragmented ? header.substring(20) : header}${'x' * 131072}'));
+      await socket.flush();
+      expect(await received.future.timeout(const Duration(seconds: 3)), 131072);
+    });
+  }
+
   test('rejects request without Proxy-Authorization with 407', () async {
     final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     final (proxy, proxyPort, _) = await _startProxy();
