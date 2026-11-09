@@ -13,7 +13,7 @@
 | **架构**     | 连接工厂直连 IP（SNI 保域名）                                 | 本地 loopback 代理转发                         |
 | **平台**     | iOS / Android / macOS / Windows / Linux                       | 仅 Android / iOS                               |
 | **缓存**     | 内存 + Hive 持久化                                            | 仅内存                                         |
-| **特色能力** | 过期 IP 复用、网络变化批量预解析、region 调度、sessionId 排查 | WebSocket/gRPC 透明转发、Dio/HttpClient 零改造 |
+| **特色能力** | 过期 IP 复用、网络变化批量预解析、region 调度、sessionId 排查 | WebSocket/gRPC 隧道转发、Dio/HttpClient 适配接入 |
 | **依赖**     | 纯 Dart（connectivity_plus / crypto / hive 等）               | 原生阿里 SDK + 代理进程                        |
 | **凭据位置** | 进 Dart 层（密钥 Dart 可读）                                  | 只在原生侧                                     |
 
@@ -126,14 +126,14 @@
 
 ### 5. **连接管理**
 
-- **连接管理**：管理 Socket 连接，支持连接复用和错误重试
+- **连接管理**：管理 Socket 连接；普通 HTTP 使用单请求连接，HTTPS 使用 CONNECT 隧道
 - **错误处理**：处理网络错误、超时、重试等异常情况，返回布尔值而非抛出异常
 - **日志记录**：记录详细的请求处理日志，便于调试和监控
 
 ### 6. **性能优化**
 
 - **智能缓存**：DNS 解析结果缓存，减少重复解析
-- **连接复用**：复用 Socket 连接，减少连接建立开销
+- **隧道转发**：HTTPS CONNECT 隧道内可承载客户端与上游协商的连接复用
 - **协议优化**：支持 HTTP/2 协议，提升传输效率
 - **负载均衡**：利用阿里云 HTTPDNS 的基础负载均衡能力
 
@@ -301,6 +301,7 @@ final response = await request.close();
 ### 1. 配置 Dio 客户端
 
 ```dart
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:dio/io.dart';
 
@@ -312,23 +313,54 @@ if (success) {
   print('代理服务器启动失败');
 }
 
-// 配置Dio使用代理
-final dio = Dio();
-final proxyConfig = await dnsService.getDioProxyConfig();
-
-if (proxyConfig != null) {
-  dio.httpClientAdapter = IOHttpClientAdapter(
-    createHttpClient: () {
-      final client = HttpClient();
-      client.findProxy = (uri) => 'PROXY ${proxyConfig['host']}:${proxyConfig['port']}';
-      return client;
-    },
-  );
+// 先异步配置底层 HttpClient，再交给同步的 createHttpClient 回调。
+// configureHttpClient 同时设置 findProxy、addProxyCredentials 和
+// authenticateProxy，支持 HTTP 与 HTTPS CONNECT 的 407 自动鉴权。
+final client = HttpClient();
+if (!await dnsService.configureHttpClient(client)) {
+  client.close(force: true);
+  throw StateError('代理未启动或客户端配置失败');
 }
+final dio = Dio();
+dio.httpClientAdapter = IOHttpClientAdapter(
+  createHttpClient: () => client,
+);
 
-// 发起请求
-final response = await dio.get('https://www.example.com');
+try {
+  final response = await dio.get('https://www.example.com');
+  print(response.statusCode);
+} finally {
+  dio.close(force: true);
+}
 ```
+
+**当前已知限制（Dart 3.11.5 本地实测）**：`configureHttpClient` 能完成 HTTP 与 HTTPS CONNECT
+鉴权，但 Dart `HttpClient` 会将预置代理凭据再次附在隧道内的 HTTPS 业务请求上，导致
+`Proxy-Authorization` 到达目标服务器。普通 HTTP 路径会由代理剥离该头。
+在解决这一 SDK 行为前，不应将以上 HTTPS 示例视为无凭据泄露的生产接入方案；
+仅手动删除 Dio 业务头不能阻止 SDK 在内部重新添加该头。
+
+#### 升级已有调用方：必须迁移代理鉴权
+
+本地代理现要求 Basic Auth。旧调用方如果只从 `getDioProxyConfig()` 读取
+`host` / `port` 并设置 `findProxy`，升级后会收到 **407 Proxy Authentication Required**，
+不会自动完成鉴权。Dio 和原生 `HttpClient` 均应在首次请求前
+`await dnsService.configureHttpClient(client)`，参考上例；无需增加新的适配 API。
+
+`getDioProxyConfig()` 返回 `host`、`port`、`username`、`token`、`auth`：
+`token` 是代理密码，`auth` 是包含 `Basic ` 前缀的完整代理鉴权值，并非 `password` 字段。
+该 Map 仅提供配置数据，Dio 不会自动读取其中凭据。自定义客户端必须使用其专用代理鉴权机制；
+**不要把 `Proxy-Authorization` 加进 Dio `headers`、业务拦截器或目标服务器请求头**。
+凭据仅供宿主与 loopback 代理通信，不要持久化或记录到日志；每次重启代理后，应关闭旧客户端并重新创建、配置。
+
+#### 协议与连接边界
+
+- 普通 HTTP 代理采用**单请求连接**，不要依赖同一代理连接复用或 HTTP pipelining。
+- HTTPS 中的 HTTP/2、gRPC 推荐使用标准 **HTTP/1.1 CONNECT 隧道**：先完成代理鉴权与 CONNECT，
+  再由客户端与目标服务器在隧道内进行 TLS / ALPN 协商，代理不解密业务流量。
+- 不能将直接发送 HTTP/2 connection preface（prior knowledge / h2c）视为上述鉴权流程的替代方案；
+  不支持“先发普通 HTTP/1 请求鉴权，再在同一连接升级 direct h2”的接入方式。
+- 代理不为客户端新增 HTTP/2 能力；实际协议由所用客户端与目标服务决定。
 
 ### 2. 自定义代理配置
 
@@ -878,7 +910,7 @@ A: 是的，当调用`stopProxy()`时，所有端口都会被自动清理。
 
 ### Q: 插件的连接管理方式是什么？
 
-A: 插件提供基础的连接管理功能，包括连接复用和错误重试，确保网络请求的稳定性和性能。连接管理采用简化的实现方式，专注于核心的网络代理功能。
+A: 普通 HTTP 代理采用单请求连接，不支持 HTTP pipelining；HTTPS CONNECT 建立后作为双向隧道转发。隧道内的连接复用与 HTTP/2 多路复用由客户端和目标服务器协商，不表示普通 HTTP 代理连接支持复用。
 
 ### Q: 如何检查端口是否可用？
 

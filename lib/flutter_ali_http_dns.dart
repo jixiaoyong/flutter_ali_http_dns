@@ -401,7 +401,11 @@ class FlutterAliHttpDns {
   /// 为 HttpClient 配置代理
   ///
   /// [client] HttpClient 实例
-  /// 配置 HttpClient 使用插件提供的代理
+  /// 同时配置代理路由、预置 Basic Auth 凭据及 407 挑战回调，
+  /// 适用于普通 HTTP 和 HTTPS CONNECT；不要另设业务鉴权头。
+  /// 应在首次请求前 await，代理重启后应创建并重新配置客户端。
+  /// 注意：Dart 3.11.5 会将预置代理凭据附到隧道内 HTTPS 请求，
+  /// 存在向目标服务器泄露凭据的已知限制，详见 README。
   /// 返回配置是否成功
   Future<bool> configureHttpClient(HttpClient client) async {
     if (!_isProxyRunning || _proxyServer == null) {
@@ -453,9 +457,11 @@ class FlutterAliHttpDns {
 
   /// 获取 Dio 代理配置
   ///
-  /// 返回用于 Dio 配置的代理设置，包含 host/port 与
-  /// username/password（Base64 编码的 Basic Auth 值）。
-  /// Dio / IOHttpClientAdapter 可基于这些字段对代理自动做 Basic Auth。
+  /// 返回 host/port、username、token（Basic Auth 密码）和
+  /// auth（含 `Basic ` 前缀的完整代理鉴权值）。仅设置 host/port 不会
+  /// 自动鉴权；Dio 的 IOHttpClientAdapter 建议复用 [configureHttpClient]。
+  /// 不要把 auth 放进 Dio 的业务请求头，否则可能泄露给目标服务器。
+  /// 代理重启后凭据会变化，需要重新配置客户端。
   Future<Map<String, dynamic>?> getDioProxyConfig() async {
     if (!_isProxyRunning || _proxyServer == null) {
       return null;

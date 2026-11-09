@@ -100,7 +100,10 @@ class BasicTests {
       onHttpResultUpdate('正在测试 HttpClient...');
 
       final client = HttpClient();
-      await _dnsService.configureHttpClient(client);
+      if (!await _dnsService.configureHttpClient(client)) {
+        client.close(force: true);
+        throw StateError('HttpClient 代理鉴权配置失败');
+      }
 
       onLogMessage('HttpClient 已配置代理');
 
@@ -207,20 +210,19 @@ class BasicTests {
       final dio = Dio();
       final proxyConfig = await _dnsService.getDioProxyConfig();
 
-      if (proxyConfig != null) {
-        dio.httpClientAdapter = IOHttpClientAdapter(
-          createHttpClient: () {
-            final client = HttpClient();
-            client.findProxy =
-                (uri) => 'PROXY ${proxyConfig['host']}:${proxyConfig['port']}';
-            return client;
-          },
-        );
-        onLogMessage(
-            'Dio 已配置代理: ${proxyConfig['host']}:${proxyConfig['port']}');
-      } else {
-        onLogMessage('无法获取代理配置');
+      if (proxyConfig == null) {
+        throw StateError('无法获取代理配置');
       }
+      final client = HttpClient();
+      if (!await _dnsService.configureHttpClient(client)) {
+        client.close(force: true);
+        throw StateError('Dio 代理鉴权配置失败');
+      }
+      dio.httpClientAdapter = IOHttpClientAdapter(
+        createHttpClient: () => client,
+      );
+      onLogMessage(
+          'Dio 已配置代理及鉴权: ${proxyConfig['host']}:${proxyConfig['port']}');
 
       // 测试多个URL以获取更详细的结果
       final testUrls = [
@@ -260,7 +262,7 @@ class BasicTests {
               '   内容长度: $contentLength 字节\n'
               '   服务器: $server\n'
               '   响应时间: $date\n'
-              '   代理配置: ${proxyConfig != null ? '已启用 (${proxyConfig['host']}:${proxyConfig['port']})' : '未配置'}\n'
+              '   代理配置: 已启用 (${proxyConfig['host']}:${proxyConfig['port']})\n'
               '   响应预览: ${response.data.toString().length > 100 ? response.data.toString().substring(0, 100) + '...' : response.data.toString()}';
 
           results.add(result);
@@ -275,7 +277,7 @@ class BasicTests {
         } catch (e) {
           final result = '❌ $url\n'
               '   错误: $e\n'
-              '   代理配置: ${proxyConfig != null ? '已启用 (${proxyConfig['host']}:${proxyConfig['port']})' : '未配置'}';
+              '   代理配置: 已启用 (${proxyConfig['host']}:${proxyConfig['port']})';
           results.add(result);
           onLogMessage('Dio 请求失败: $url -> $e');
 
@@ -329,13 +331,13 @@ class BasicTests {
 
       onLogMessage('代理配置: ${proxyConfig['host']}:${proxyConfig['port']}');
 
+      final client = HttpClient();
+      if (!await _dnsService.configureHttpClient(client)) {
+        client.close(force: true);
+        throw StateError('Dio 代理鉴权配置失败');
+      }
       dio.httpClientAdapter = IOHttpClientAdapter(
-        createHttpClient: () {
-          final client = HttpClient();
-          client.findProxy =
-              (uri) => 'PROXY ${proxyConfig['host']}:${proxyConfig['port']}';
-          return client;
-        },
+        createHttpClient: () => client,
       );
 
       // 测试请求
