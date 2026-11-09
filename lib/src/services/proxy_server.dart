@@ -297,7 +297,8 @@ class ProxyServer {
 
   /// 停止所有实例
   static Future<void> stopAll() async {
-    for (final server in _instancesByPort.values) {
+    // stop 会删除端口映射；快照去重后再遍历，避免并发修改及重复停止。
+    for (final server in _instancesByPort.values.toSet()) {
       await server.stop();
     }
     _instancesByPort.clear();

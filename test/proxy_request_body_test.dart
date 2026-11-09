@@ -275,6 +275,22 @@ void main() {
     expect(bytes, payload);
   });
 
+  test('stopAll safely stops multiple instances and multiple ports', () async {
+    final (first, _, _) = await _startProxy();
+    final (second, _, _) = await _startProxy();
+    addTearDown(first.stop);
+    addTearDown(second.stop);
+    final reservation =
+        await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final extraPort = reservation.port;
+    await reservation.close();
+    expect(await first.registerPort(extraPort), isTrue);
+    await ProxyServer.stopAll();
+    expect(first.isRunning, isFalse);
+    expect(second.isRunning, isFalse);
+    expect(ProxyServer.getRunningPorts(), isEmpty);
+  });
+
   test('registerPort preserves credentials for existing clients', () async {
     final (proxy, port, credentials) = await _startProxy();
     addTearDown(proxy.stop);
