@@ -471,6 +471,8 @@ class _ClientHandler {
     // 直接使用client.listen，避免asBroadcastStream的问题
     clientSubscription = client.listen(
       (data) async {
+        // listen 不会等待 async 回调；显式暂停以串行建连和限制待写积压。
+        clientSubscription?.pause();
         try {
           if (server == null) {
             if (_pendingHttpRequest != null) {
@@ -574,18 +576,12 @@ class _ClientHandler {
                       serverSubscription = server!.listen(
                         (data) {
                           try {
-                            if (_checkUpstreamLimit(data.length)) {
-                              Logger.warning(
-                                'Upstream buffer exceeded limit, closing '
-                                'WebSocket connection',
-                              );
-                              close();
-                              return;
-                            }
+                            serverSubscription?.pause();
                             Logger.debug(
                               'Server -> Client (WebSocket): ${data.length} bytes',
                             );
                             client.add(data);
+                            _drainClient();
                             _logDataForwarding(
                               'Server -> Client',
                               data.length,
@@ -605,7 +601,7 @@ class _ClientHandler {
                         },
                         onDone: () {
                           Logger.debug('Server connection closed');
-                          close();
+                          _finishResponse();
                         },
                       );
                     }
@@ -646,18 +642,12 @@ class _ClientHandler {
                         serverSubscription = server!.listen(
                           (data) {
                             try {
-                              if (_checkUpstreamLimit(data.length)) {
-                                Logger.warning(
-                                  'Upstream buffer exceeded limit, closing '
-                                  'HTTPS tunnel',
-                                );
-                                close();
-                                return;
-                              }
+                              serverSubscription?.pause();
                               Logger.debug(
                                 'Server -> Client (HTTPS): ${data.length} bytes',
                               );
                               client.add(data);
+                              _drainClient();
                               _logDataForwarding(
                                 'Server -> Client',
                                 data.length,
@@ -677,7 +667,7 @@ class _ClientHandler {
                           },
                           onDone: () {
                             Logger.debug('Server connection closed');
-                            close();
+                            _finishResponse();
                           },
                         );
                       }
@@ -772,6 +762,15 @@ class _ClientHandler {
         } catch (e) {
           Logger.error('Client request handling error', e);
           close();
+        } finally {
+          if (!_isClosed) {
+            try {
+              await server?.flush();
+              clientSubscription?.resume();
+            } catch (_) {
+              close();
+            }
+          }
         }
       },
       onError: (error) {
@@ -807,14 +806,12 @@ class _ClientHandler {
     if (body.isNotEmpty) server!.add(body);
     serverSubscription = server!.listen(
       (data) {
-        if (_checkUpstreamLimit(data.length)) {
-          close();
-          return;
-        }
+        serverSubscription?.pause();
         client.add(data);
+        _drainClient();
       },
       onError: (_) => close(),
-      onDone: close,
+      onDone: _finishResponse,
     );
   }
 
@@ -1405,20 +1402,25 @@ Connection Details:
     }
   }
 
-  // 上游响应累计缓冲上限 1 MiB，超限立即断开。
-  int _upstreamBytes = 0;
-
-  bool _checkUpstreamLimit(int dataLength) {
-    _upstreamBytes += dataLength;
-    if (_upstreamBytes > ProxyLimits.maxUpstreamBufferBytes) {
-      Logger.warning(
-        'Upstream response buffer exceeded limit '
-        '($_upstreamBytes > ${ProxyLimits.maxUpstreamBufferBytes}), '
-        'closing connection',
-      );
-      return true;
+  // 每个上游事件写完后才恢复读取，不以连接累计流量代替积压大小。
+  Future<void> _drainClient() async {
+    try {
+      await client.flush();
+      if (!_isClosed) serverSubscription?.resume();
+    } catch (_) {
+      close();
     }
-    return false;
+  }
+
+  Future<void> _finishResponse() async {
+    try {
+      await client.flush();
+      await client.close();
+    } catch (_) {
+      // 对端已关闭。
+    } finally {
+      close();
+    }
   }
 
   /// 添加数据转发监控日志

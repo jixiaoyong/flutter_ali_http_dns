@@ -86,16 +86,82 @@ class _RealHttpOverrides extends HttpOverrides {}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('HTTP response larger than 1MiB is not truncated', () async {
+    final payload = 'z' * (2 * 1024 * 1024);
+    final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => target.close(force: true));
+    target.listen((request) async {
+      request.response.contentLength = payload.length;
+      request.response.write(payload);
+      await request.response.close();
+    });
+    final (proxy, port, credentials) = await _startProxy();
+    addTearDown(proxy.stop);
+    final response = await _sendRawRequest(
+        port,
+        'GET http://127.0.0.1:${target.port}/ HTTP/1.1\r\n'
+        'Proxy-Authorization: ${credentials.basicAuthValue()}\r\n\r\n');
+    final text = utf8.decode(response);
+    expect(text.substring(text.indexOf('\r\n\r\n') + 4), payload);
+  });
+
+  test('CONNECT continuously echoes more than 1MiB', () async {
+    final target = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final peers = <Socket>[];
+    addTearDown(() async {
+      for (final peer in peers) {
+        peer.destroy();
+      }
+      await target.close();
+    });
+    target.listen((peer) {
+      peers.add(peer);
+      peer.listen(peer.add);
+    });
+    final (proxy, port, credentials) = await _startProxy();
+    addTearDown(proxy.stop);
+    final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+    addTearDown(socket.destroy);
+    final ready = Completer<void>();
+    final done = Completer<void>();
+    final bytes = <int>[];
+    final payload = List<int>.generate(2 * 1024 * 1024, (i) => i % 256);
+    var headerDone = false;
+    socket.listen((data) {
+      bytes.addAll(data);
+      if (!headerDone) {
+        final end = latin1.decode(bytes).indexOf('\r\n\r\n');
+        if (end < 0) return;
+        expect(latin1.decode(bytes.sublist(0, end)), contains('200'));
+        bytes.removeRange(0, end + 4);
+        headerDone = true;
+        ready.complete();
+      }
+      if (bytes.length == payload.length && !done.isCompleted) done.complete();
+    });
+    socket.add(utf8.encode('CONNECT 127.0.0.1:${target.port} HTTP/1.1\r\n'
+        'Proxy-Authorization: ${credentials.basicAuthValue()}\r\n\r\n'));
+    await ready.future.timeout(const Duration(seconds: 3));
+    for (var offset = 0; offset < payload.length; offset += 16384) {
+      socket.add(payload.sublist(offset, offset + 16384));
+      await socket.flush();
+    }
+    await done.future.timeout(const Duration(seconds: 5));
+    expect(bytes, payload);
+  });
+
   test('registerPort preserves credentials for existing clients', () async {
     final (proxy, port, credentials) = await _startProxy();
     addTearDown(proxy.stop);
-    final reservation = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final reservation =
+        await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final extraPort = reservation.port;
     await reservation.close();
     expect(await proxy.registerPort(extraPort), isTrue);
     expect(proxy.credentials.basicAuthValue(), credentials.basicAuthValue());
     for (final listeningPort in [port, extraPort]) {
-      final response = await _sendRawRequest(listeningPort,
+      final response = await _sendRawRequest(
+          listeningPort,
           'GET http://127.0.0.1:1/ HTTP/1.1\r\n'
           'Proxy-Authorization: ${credentials.basicAuthValue()}\r\n\r\n');
       expect(_parseRawResponse(response).$1, isNot(contains('407')));
@@ -146,12 +212,14 @@ void main() {
   });
 
   for (final fragmented in [false, true]) {
-    test('large same-event body excludes header limit fragmented=$fragmented', () async {
+    test('large same-event body excludes header limit fragmented=$fragmented',
+        () async {
       final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => target.close(force: true));
       final received = Completer<int>();
       target.listen((request) async {
-        received.complete(await request.fold<int>(0, (sum, data) => sum + data.length));
+        received.complete(
+            await request.fold<int>(0, (sum, data) => sum + data.length));
         await request.response.close();
       });
       final (proxy, port, credentials) = await _startProxy();
@@ -167,7 +235,8 @@ void main() {
         await socket.flush();
         await Future<void>.delayed(const Duration(milliseconds: 20));
       }
-      socket.add(utf8.encode('${fragmented ? header.substring(20) : header}${'x' * 131072}'));
+      socket.add(utf8.encode(
+          '${fragmented ? header.substring(20) : header}${'x' * 131072}'));
       await socket.flush();
       expect(await received.future.timeout(const Duration(seconds: 3)), 131072);
     });
