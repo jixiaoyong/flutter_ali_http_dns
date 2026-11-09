@@ -36,7 +36,7 @@ abstract final class ProxySecurityConstants {
 
 /// 支持 HTTPDNS 的代理服务器
 /// - 兼容 Dio（原域名+原端口）
-/// - 支持HTTP/2协议（使用http2库）
+/// - HTTP/2 / gRPC 通过鉴权后的标准 CONNECT 隧道透明承载
 /// - 仅绑定 loopback，避免成为无认证开放代理
 class ProxyServer {
   ProxyConfig config;
@@ -634,9 +634,11 @@ class _ClientHandler {
                 case ProtocolType.http2:
                 case ProtocolType.grpc: // gRPC也使用HTTP/2处理
                   if (!_isHttp2) {
-                    // HTTP/2 前置数据不包含常规 Proxy-Authorization 头，
-                    // 无法按 HTTP/1 方式校验。为保证「鉴权后转发」，
-                    // 要求客户端先以 HTTP/1 请求通过鉴权（_isAuthenticated）。
+                    // 原始 h2 prior-knowledge / gRPC direct 不支持 HTTP/1
+                    // Basic 代理鉴权，不能放行。普通 HTTP 又严格一请求一连接，
+                    // 因此不支持在此连接上先 HTTP/1 鉴权再升级 h2。
+                    // 客户端应先发送带凭据的标准 CONNECT；隧道建立后所有
+                    // HTTP/2 前言、TLS 和二进制帧均透明转发，不再协议检测。
                     if (!_isAuthenticated) {
                       _rejectUnauthorized();
                       return;

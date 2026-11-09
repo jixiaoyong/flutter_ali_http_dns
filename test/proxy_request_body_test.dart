@@ -230,6 +230,56 @@ void main() {
     expect(text.substring(text.indexOf('\r\n\r\n') + 4), payload);
   });
 
+  test('raw HTTP2 direct cannot bypass proxy authentication', () async {
+    final (proxy, port, _) = await _startProxy();
+    addTearDown(proxy.stop);
+    await _expect407(port, 'PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n');
+  });
+
+  test('CONNECT preserves coalesced HTTP2 preface and binary frames', () async {
+    final target = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final peers = <Socket>[];
+    addTearDown(() async {
+      for (final peer in peers) {
+        peer.destroy();
+      }
+      await target.close();
+    });
+    target.listen((peer) {
+      peers.add(peer);
+      peer.listen(peer.add);
+    });
+    final (proxy, port, credentials) = await _startProxy();
+    addTearDown(proxy.stop);
+    final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+    addTearDown(socket.destroy);
+    final payload = <int>[
+      ...utf8.encode('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'),
+      0, 0, 0, 4, 0, 0, 0, 0, 0, // SETTINGS
+      0, 0, 5, 0, 0, 0, 0, 0, 1, 0, 255, 13, 10, 128,
+      ...utf8.encode('Proxy-Authorization: not-a-proxy-header\r\n\r\n'),
+    ];
+    final received = <int>[];
+    final done = Completer<void>();
+    socket.listen((data) {
+      received.addAll(data);
+      final end = latin1.decode(received).indexOf('\r\n\r\n');
+      if (end >= 0 &&
+          received.length == end + 4 + payload.length &&
+          !done.isCompleted) done.complete();
+    });
+    socket.add([
+      ...utf8.encode('CONNECT 127.0.0.1:${target.port} HTTP/1.1\r\n'
+          'Proxy-Authorization: ${credentials.basicAuthValue()}\r\n\r\n'),
+      ...payload,
+    ]);
+    await socket.flush();
+    await done.future.timeout(const Duration(seconds: 3));
+    final end = latin1.decode(received).indexOf('\r\n\r\n');
+    expect(latin1.decode(received.sublist(0, end)), contains('200'));
+    expect(received.sublist(end + 4), payload);
+  });
+
   test('CONNECT continuously echoes more than 1MiB', () async {
     final target = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final peers = <Socket>[];
