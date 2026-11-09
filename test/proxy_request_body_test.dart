@@ -266,7 +266,9 @@ void main() {
       final end = latin1.decode(received).indexOf('\r\n\r\n');
       if (end >= 0 &&
           received.length == end + 4 + payload.length &&
-          !done.isCompleted) done.complete();
+          !done.isCompleted) {
+        done.complete();
+      }
     });
     socket.add([
       ...utf8.encode('CONNECT 127.0.0.1:${target.port} HTTP/1.1\r\n'

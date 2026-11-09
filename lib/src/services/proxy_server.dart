@@ -572,6 +572,7 @@ class _ClientHandler {
   bool _isWebSocket = false; // 标记是否为WebSocket连接
   bool _isAuthenticated = false; // 标记是否已通过代理鉴权
   bool _isClosed = false; // 标记连接是否已关闭
+  bool _isFinishing = false; // 排空响应期间不再恢复客户端读取
   StreamSubscription? clientSubscription;
   StreamSubscription? serverSubscription;
   Timer? _headerTimeout;
@@ -856,7 +857,7 @@ class _ClientHandler {
           Logger.error('Client request handling error', e);
           close();
         } finally {
-          if (!_isClosed) {
+          if (!_isClosed && !_isFinishing) {
             try {
               await server?.flush();
               clientSubscription?.resume();
@@ -1523,16 +1524,21 @@ Connection Details:
   Future<void> _drainClient() async {
     try {
       await client.flush();
-      if (!_isClosed) serverSubscription?.resume();
+      if (!_isClosed && !_isFinishing) serverSubscription?.resume();
     } catch (_) {
       close();
     }
   }
 
   Future<void> _finishResponse() async {
+    if (_isClosed || _isFinishing) return;
+    _isFinishing = true;
+    _headerTimeout?.cancel();
+    _bodyTimeout?.cancel();
+    clientSubscription?.pause();
     try {
-      await client.flush();
-      await client.close();
+      await client.flush().timeout(const Duration(seconds: 10));
+      await client.close().timeout(const Duration(seconds: 10));
     } catch (_) {
       // 对端已关闭。
     } finally {
