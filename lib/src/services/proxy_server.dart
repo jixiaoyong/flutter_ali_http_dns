@@ -47,7 +47,7 @@ class ProxyServer {
   // DNS解析器
   final DnsResolver _dnsResolver;
 
-  // 当前实例的代理鉴权凭据（每次启动/注册端口时重新生成，不落盘）
+  // 当前实例启动周期的代理鉴权凭据（新增端口时保持不变，不落盘）
   ProxyCredentials _credentials = ProxyCredentials.generate();
   ProxyCredentials get credentials => _credentials;
 
@@ -351,9 +351,6 @@ class ProxyServer {
         Logger.error('Port $port is not available');
         return false;
       }
-
-      // 每次新增监听端口时重新生成鉴权凭据，保证首次注册即启用鉴权。
-      _credentials = ProxyCredentials.generate();
 
       // 创建服务器socket并开始监听
       await _createServerSocket(port);

@@ -86,6 +86,22 @@ class _RealHttpOverrides extends HttpOverrides {}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('registerPort preserves credentials for existing clients', () async {
+    final (proxy, port, credentials) = await _startProxy();
+    addTearDown(proxy.stop);
+    final reservation = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final extraPort = reservation.port;
+    await reservation.close();
+    expect(await proxy.registerPort(extraPort), isTrue);
+    expect(proxy.credentials.basicAuthValue(), credentials.basicAuthValue());
+    for (final listeningPort in [port, extraPort]) {
+      final response = await _sendRawRequest(listeningPort,
+          'GET http://127.0.0.1:1/ HTTP/1.1\r\n'
+          'Proxy-Authorization: ${credentials.basicAuthValue()}\r\n\r\n');
+      expect(_parseRawResponse(response).$1, isNot(contains('407')));
+    }
+  });
+
   test('forwards POST body arriving with request headers (with auth)',
       () async {
     final body = Completer<String>();
