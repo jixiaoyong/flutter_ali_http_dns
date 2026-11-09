@@ -6,6 +6,7 @@ import 'src/models/dns_config.dart';
 import 'src/models/proxy_config.dart';
 import 'src/services/dns_resolver.dart';
 import 'src/services/proxy_server.dart';
+import 'src/services/proxy_connection.dart';
 import 'src/services/cache_manager.dart';
 import 'src/utils/logger.dart';
 import 'src/utils/port_utils.dart';
@@ -401,13 +402,15 @@ class FlutterAliHttpDns {
   /// 为 HttpClient 配置代理
   ///
   /// [client] HttpClient 实例
-  /// 同时配置代理路由、预置 Basic Auth 凭据及 407 挑战回调，
-  /// 适用于普通 HTTP 和 HTTPS CONNECT；不要另设业务鉴权头。
+  /// HTTP/HTTPS 均通过独立鉴权 CONNECT 隧道，不向业务客户端注册凭据。
+  /// 覆盖 findProxy 和 connectionFactory；应传入新的、未注册代理凭据的客户端。
+  /// HTTPS 在工厂内执行 TLS，默认验证系统信任及目标域名；自定义 CA / mTLS
+  /// 必须显式传入 [context]，无法继承 client 私有的 TLS context、证书回调或 keyLog。
+  /// 建连、CONNECT 与 TLS 总超时使用 client.connectionTimeout，未设时为 30 秒。
   /// 应在首次请求前 await，代理重启后应创建并重新配置客户端。
-  /// 注意：Dart 3.11.5 会将预置代理凭据附到隧道内 HTTPS 请求，
-  /// 存在向目标服务器泄露凭据的已知限制，详见 README。
   /// 返回配置是否成功
-  Future<bool> configureHttpClient(HttpClient client) async {
+  Future<bool> configureHttpClient(HttpClient client,
+      {SecurityContext? context}) async {
     if (!_isProxyRunning || _proxyServer == null) {
       Logger.error('Proxy server not running. Call startProxy() first.');
       return false;
@@ -416,12 +419,6 @@ class FlutterAliHttpDns {
     try {
       final proxyConfig = await getProxyConfigString();
       if (proxyConfig != null) {
-        client.findProxy = (uri) => proxyConfig;
-
-        // 为 dart:io HttpClient 配置代理 Basic Auth：
-        // addProxyCredentials 预置凭据，authenticateProxy 返回 true
-        // 使 dart:io 在代理返回 407 + Proxy-Authenticate 挑战时自动
-        // 附上对应凭据，避免由调用方手工拼 Proxy-Authorization 头。
         final credentials = _proxyServer!.credentials;
         final address = await getProxyAddress();
         if (address == null) return false;
@@ -430,18 +427,15 @@ class FlutterAliHttpDns {
         final proxyHost = address.substring(0, separator);
         final proxyPort = int.tryParse(address.substring(separator + 1));
         if (proxyPort == null) return false;
-        client.addProxyCredentials(
-          proxyHost,
-          proxyPort,
-          ProxyCredentials.realm,
-          HttpClientBasicCredentials(credentials.username, credentials.token),
-        );
-        client.authenticateProxy = (host, port, scheme, realm) async {
-          return host == proxyHost &&
-              port == proxyPort &&
-              scheme.toLowerCase() == 'basic' &&
-              realm == ProxyCredentials.realm;
-        };
+        client.findProxy = (_) => 'DIRECT';
+        client.connectionFactory = (uri, _, __) => connectThroughProxy(
+              uri,
+              proxyHost: proxyHost,
+              proxyPort: proxyPort,
+              credentials: credentials,
+              context: context,
+              timeout: client.connectionTimeout ?? const Duration(seconds: 30),
+            );
 
         Logger.info('HttpClient configured with proxy: $proxyConfig');
         return true;
