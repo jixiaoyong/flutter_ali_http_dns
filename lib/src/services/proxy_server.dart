@@ -443,6 +443,122 @@ class ProxyServer {
   }
 }
 
+/// 首个请求的 framing 状态；只保留最多 8 KiB chunk 元数据，不缓存 body。
+class _RequestBodyFraming {
+  int remaining;
+  final bool chunked;
+  String _line = '';
+  String _state;
+  int _metadataBytes = 0;
+  bool done;
+
+  _RequestBodyFraming(this.remaining, this.chunked)
+      : _state = chunked ? 'size' : 'data',
+        done = !chunked && remaining == 0;
+
+  factory _RequestBodyFraming.fromHeaders(String request) {
+    final lengths = <String>[];
+    final encodings = <String>[];
+    for (final line in request.split('\r\n').skip(1)) {
+      if (line.isEmpty) continue;
+      final colon = line.indexOf(':');
+      if (colon <= 0 ||
+          line.startsWith(' ') ||
+          line.startsWith('\t') ||
+          line.substring(0, colon).trim() != line.substring(0, colon)) {
+        throw const FormatException('Invalid header');
+      }
+      final name = line.substring(0, colon).toLowerCase();
+      if (name == 'content-length') {
+        lengths.add(line.substring(colon + 1).trim());
+      }
+      if (name == 'transfer-encoding') {
+        encodings.add(line.substring(colon + 1).trim().toLowerCase());
+      }
+    }
+    // 拒绝重复、逗号列表、TE+CL 和不支持的编码，避免请求走私。
+    if (lengths.length > 1 ||
+        encodings.length > 1 ||
+        (lengths.isNotEmpty && encodings.isNotEmpty) ||
+        (encodings.isNotEmpty && encodings.single != 'chunked')) {
+      throw const FormatException('Ambiguous framing');
+    }
+    if (encodings.isNotEmpty) return _RequestBodyFraming(0, true);
+    final value = lengths.isEmpty ? '0' : lengths.single;
+    if (!RegExp(r'^[0-9]+$').hasMatch(value)) {
+      throw const FormatException('Invalid length');
+    }
+    final length = int.tryParse(value);
+    if (length == null) throw const FormatException('Invalid length');
+    return _RequestBodyFraming(length, false);
+  }
+
+  int consume(List<int> data) {
+    var offset = 0;
+    while (offset < data.length && !done) {
+      if (_state == 'data') {
+        final count =
+            remaining < data.length - offset ? remaining : data.length - offset;
+        offset += count;
+        remaining -= count;
+        if (remaining == 0) {
+          if (!chunked) {
+            done = true;
+          } else {
+            _state = 'dataEnd';
+          }
+        }
+        continue;
+      }
+      final byte = data[offset++];
+      if (byte > 127 || ++_metadataBytes > 8192) {
+        throw const FormatException('Chunk metadata too large');
+      }
+      _line += String.fromCharCode(byte);
+      if (!_line.endsWith('\r\n')) continue;
+      final line = _line.substring(0, _line.length - 2);
+      _line = '';
+      if (_state == 'dataEnd') {
+        if (line.isNotEmpty) {
+          throw const FormatException('Invalid chunk terminator');
+        }
+        _state = 'size';
+        _metadataBytes = 0;
+      } else if (_state == 'size') {
+        if (!RegExp(r'^[0-9a-fA-F]+(?:;[\x20-\x7e]*)?$').hasMatch(line)) {
+          throw const FormatException('Invalid chunk size');
+        }
+        final size = int.tryParse(line.split(';').first, radix: 16);
+        if (size == null || size < 0) {
+          throw const FormatException('Invalid chunk size');
+        }
+        remaining = size;
+        _state = size == 0 ? 'trailer' : 'data';
+        _metadataBytes = 0;
+      } else {
+        if (line.isEmpty) {
+          done = true;
+        } else {
+          final colon = line.indexOf(':');
+          if (colon <= 0 ||
+              line.startsWith(' ') ||
+              line.startsWith('\t') ||
+              [
+                'content-length',
+                'transfer-encoding',
+                'host',
+                'connection',
+                'proxy-authorization'
+              ].contains(line.substring(0, colon).toLowerCase())) {
+            throw const FormatException('Invalid trailer');
+          }
+        }
+      }
+    }
+    return offset;
+  }
+}
+
 /// 客户端连接处理器
 class _ClientHandler {
   final Socket client;
@@ -459,8 +575,8 @@ class _ClientHandler {
   StreamSubscription? serverSubscription;
   Timer? _headerTimeout;
   int _clientSentBytes = 0;
-  String? _pendingHttpRequest;
-  int _pendingHttpBodyBytes = 0;
+  _RequestBodyFraming? _httpBody;
+  Timer? _bodyTimeout;
 
   _ClientHandler(this.client, this.proxyServer, this.serverPort);
 
@@ -475,17 +591,6 @@ class _ClientHandler {
         clientSubscription?.pause();
         try {
           if (server == null) {
-            if (_pendingHttpRequest != null) {
-              buffer.addAll(data);
-              if (buffer.length >= _pendingHttpBodyBytes) {
-                final request = _pendingHttpRequest!;
-                _pendingHttpRequest = null;
-                final body = buffer.sublist(0, _pendingHttpBodyBytes);
-                buffer.clear();
-                await _forwardHttpRequest(request, body);
-              }
-              return;
-            }
             buffer.addAll(data);
             final headerEnd = _findHttpRequestEnd();
             // 只统计头部边界，不能把同一 socket 事件中的 body 算入请求头。
@@ -682,37 +787,20 @@ class _ClientHandler {
                       _rejectUnauthorized();
                       return;
                     }
-                    final transferEncoding =
-                        _extractHeaderValue(requestString, 'Transfer-Encoding');
-                    if (transferEncoding != null &&
-                        transferEncoding.isNotEmpty) {
-                      _sendAndClose(
-                        'HTTP/1.1 501 Not Implemented\r\n'
-                        'Connection: close\r\n'
-                        'Content-Length: 0\r\n\r\n',
-                      );
+                    try {
+                      _httpBody =
+                          _RequestBodyFraming.fromHeaders(requestString);
+                    } on FormatException {
+                      _sendAndClose('HTTP/1.1 400 Bad Request\r\n'
+                          'Connection: close\r\nContent-Length: 0\r\n\r\n');
                       return;
                     }
-                    final contentLengthValue =
-                        _extractHeaderValue(requestString, 'Content-Length');
-                    final contentLength =
-                        int.tryParse(contentLengthValue ?? '0');
-                    if (contentLength == null || contentLength < 0) {
-                      _sendAndClose(
-                        'HTTP/1.1 400 Bad Request\r\n'
-                        'Connection: close\r\n'
-                        'Content-Length: 0\r\n\r\n',
-                      );
-                      return;
+                    await _forwardHttpRequest(requestString);
+                    if (!_isClosed) {
+                      final initial = buffer;
+                      buffer = [];
+                      await _forwardBody(initial);
                     }
-                    if (buffer.length < contentLength) {
-                      _pendingHttpRequest = requestString;
-                      _pendingHttpBodyBytes = contentLength;
-                      return;
-                    }
-                    final body = buffer.sublist(0, contentLength);
-                    buffer.clear(); // 丢弃同包流水线中的第二个请求。
-                    await _forwardHttpRequest(requestString, body);
                     return;
                   }
                   break;
@@ -734,6 +822,8 @@ class _ClientHandler {
                   break;
               }
             }
+          } else if (_httpBody != null) {
+            await _forwardBody(data);
           } else {
             // 数据转发
             try {
@@ -781,10 +871,8 @@ class _ClientHandler {
     );
   }
 
-  /// 普通 HTTP 严格一请求一连接：收齐首请求 body 后取消客户端读取，
-  /// 后续 keep-alive/流水线字节不会进入上游。
-  Future<void> _forwardHttpRequest(String requestString, List<int> body) async {
-    await clientSubscription?.cancel();
+  /// 普通 HTTP 在校验 framing 后立即转发请求头，body 按事件有界转发。
+  Future<void> _forwardHttpRequest(String requestString) async {
     final httpMatch =
         RegExp(r'^([A-Z]+) ([^ ]+) HTTP/').firstMatch(requestString);
     if (httpMatch == null) {
@@ -803,7 +891,6 @@ class _ClientHandler {
       return;
     }
     server = serverSocket;
-    if (body.isNotEmpty) server!.add(body);
     serverSubscription = server!.listen(
       (data) {
         serverSubscription?.pause();
@@ -813,6 +900,27 @@ class _ClientHandler {
       onError: (_) => close(),
       onDone: _finishResponse,
     );
+  }
+
+  Future<void> _forwardBody(List<int> data) async {
+    try {
+      final count = _httpBody!.consume(data);
+      if (count > 0) server!.add(data.sublist(0, count));
+      await server!.flush();
+      _bodyTimeout?.cancel();
+      if (_httpBody!.done) {
+        // 只允许一个请求，精确截断同包和随后到达的流水线字节。
+        await clientSubscription?.cancel();
+      } else {
+        _bodyTimeout = Timer(const Duration(seconds: 10), () {
+          _sendAndClose('HTTP/1.1 408 Request Timeout\r\n'
+              'Connection: close\r\nContent-Length: 0\r\n\r\n');
+        });
+      }
+    } on FormatException {
+      _sendAndClose('HTTP/1.1 400 Bad Request\r\n'
+          'Connection: close\r\nContent-Length: 0\r\n\r\n');
+    }
   }
 
   /// 将目标连接建立前累计的数据按原顺序转发，避免遗漏与请求头同包到达的 body。
@@ -880,13 +988,18 @@ class _ClientHandler {
 
   /// 写入响应并立即关闭连接。
   void _sendAndClose(String response) {
+    if (_isClosed) return;
+    _headerTimeout?.cancel();
+    _bodyTimeout?.cancel();
+    clientSubscription?.pause();
+    serverSubscription?.pause();
     try {
       client.add(utf8.encode(response));
-      client.flush();
+      _finishResponse();
     } catch (e) {
       Logger.error('Failed to send response to client', e);
+      close();
     }
-    close();
   }
 
   /// 从请求字符串中提取指定头（大小写不敏感）的值。
@@ -1385,6 +1498,7 @@ Connection Details:
       // 取消订阅与超时定时器，防止悬空回调
       _headerTimeout?.cancel();
       _headerTimeout = null;
+      _bodyTimeout?.cancel();
       clientSubscription?.cancel();
       serverSubscription?.cancel();
 

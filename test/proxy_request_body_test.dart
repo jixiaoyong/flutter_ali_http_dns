@@ -86,6 +86,131 @@ class _RealHttpOverrides extends HttpOverrides {}
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  for (final chunked in [false, true]) {
+    test('streams large fragmented body chunked=$chunked and drops pipeline',
+        () async {
+      final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => target.close(force: true));
+      final firstBytes = Completer<void>();
+      final completeBody = Completer<int>();
+      var requests = 0;
+      target.listen((request) async {
+        requests++;
+        var count = 0;
+        await for (final data in request) {
+          count += data.length;
+          if (!firstBytes.isCompleted) firstBytes.complete();
+        }
+        completeBody.complete(count);
+        request.response.write('ok');
+        await request.response.close();
+      });
+      final (proxy, port, credentials) = await _startProxy();
+      addTearDown(proxy.stop);
+      final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+      addTearDown(socket.destroy);
+      final responseDone = Completer<void>();
+      socket.listen((_) {}, onDone: responseDone.complete);
+      const size = 2 * 1024 * 1024;
+      socket.add(utf8.encode(
+          'POST http://127.0.0.1:${target.port}/ HTTP/1.1\r\n'
+          'Host: 127.0.0.1\r\nProxy-Authorization: ${credentials.basicAuthValue()}\r\n'
+          '${chunked ? 'Transfer-Encoding: chunked' : 'Content-Length: $size'}\r\n\r\n'));
+      for (var offset = 0; offset < size; offset += 16384) {
+        final body = 'a' * 16384;
+        if (chunked) {
+          // 大小行、body、结束符可分别跨 socket 事件。
+          socket.add(utf8.encode('4000;test=yes\r'));
+          await socket.flush();
+          socket.add(utf8.encode('\n$body\r\n'));
+        } else {
+          socket.add(utf8.encode(body));
+        }
+        await socket.flush();
+        if (offset == 0) {
+          await firstBytes.future.timeout(const Duration(seconds: 3));
+        }
+      }
+      socket.add(utf8.encode('${chunked ? '0\r\n\r\n' : ''}'
+          'GET http://127.0.0.1:${target.port}/pipeline HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n'));
+      await socket.flush();
+      expect(
+          await completeBody.future.timeout(const Duration(seconds: 5)), size);
+      await responseDone.future.timeout(const Duration(seconds: 3));
+      expect(requests, 1);
+    });
+  }
+
+  for (final framing in [
+    'Content-Length: -1',
+    'Content-Length: +1',
+    'Content-Length: 1, 1',
+    'Content-Length: 1\r\nContent-Length: 1',
+    'Content-Length: 1\r\nTransfer-Encoding: chunked',
+    'Transfer-Encoding: gzip, chunked',
+    'Transfer-Encoding: chunked\r\nTransfer-Encoding: chunked',
+  ]) {
+    test('rejects ambiguous request framing $framing', () async {
+      final (proxy, port, credentials) = await _startProxy();
+      addTearDown(proxy.stop);
+      final response = await _sendRawRequest(
+          port,
+          'POST http://127.0.0.1:1/ HTTP/1.1\r\n'
+          'Proxy-Authorization: ${credentials.basicAuthValue()}\r\n$framing\r\n\r\n');
+      expect(_parseRawResponse(response).$1, contains('400'));
+    });
+  }
+
+  test('incomplete body times out and releases authenticated slot', () async {
+    final target = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final peers = <Socket>[];
+    target.listen((peer) {
+      peers.add(peer);
+      peer.listen((_) {});
+    });
+    addTearDown(() async {
+      for (final peer in peers) {
+        peer.destroy();
+      }
+      await target.close();
+    });
+    final (proxy, port, credentials) = await _startProxy();
+    addTearDown(proxy.stop);
+    final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+    addTearDown(socket.destroy);
+    final response = Completer<String>();
+    final bytes = <int>[];
+    socket.listen(bytes.addAll,
+        onDone: () => response.complete(utf8.decode(bytes)));
+    socket.add(utf8.encode('POST http://127.0.0.1:${target.port}/ HTTP/1.1\r\n'
+        'Proxy-Authorization: ${credentials.basicAuthValue()}\r\nContent-Length: 100\r\n\r\nx'));
+    expect(await response.future.timeout(const Duration(seconds: 12)),
+        contains('408'));
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(proxy.authenticatedClientCount, 0);
+  });
+
+  test('client close during incomplete body releases upstream and slot',
+      () async {
+    final target = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(target.close);
+    final upstreamClosed = Completer<void>();
+    target.listen((peer) {
+      addTearDown(peer.destroy);
+      peer.listen((_) {}, onDone: upstreamClosed.complete);
+    });
+    final (proxy, port, credentials) = await _startProxy();
+    addTearDown(proxy.stop);
+    final socket = await Socket.connect(InternetAddress.loopbackIPv4, port);
+    socket.add(utf8.encode('POST http://127.0.0.1:${target.port}/ HTTP/1.1\r\n'
+        'Proxy-Authorization: ${credentials.basicAuthValue()}\r\nContent-Length: 100\r\n\r\nx'));
+    await socket.flush();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    socket.destroy();
+    await upstreamClosed.future.timeout(const Duration(seconds: 3));
+    expect(proxy.authenticatedClientCount, 0);
+  });
+
   test('HTTP response larger than 1MiB is not truncated', () async {
     final payload = 'z' * (2 * 1024 * 1024);
     final target = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
